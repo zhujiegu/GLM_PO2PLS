@@ -1,0 +1,26 @@
+{
+    "collab_server" : "",
+    "contents" : "",
+    "created" : 1601893628040.000,
+    "dirty" : false,
+    "encoding" : "UTF-8",
+    "folds" : "",
+    "hash" : "3204780062",
+    "id" : "632FAFAF",
+    "lastKnownWriteTime" : 1604270367,
+    "last_content_update" : 1604270367881,
+    "path" : "~/Mygit/Supervised_PO2PLS/SuPO2PLS.R",
+    "project_path" : "SuPO2PLS.R",
+    "properties" : {
+        "cursorPosition" : "274,36",
+        "scrollLine" : "262",
+        "tempName" : "Untitled1"
+    },
+    "read_only" : false,
+    "read_only_alternatives" : [
+    ],
+    "relative_order" : 3,
+    "source_on_save" : true,
+    "source_window" : "",
+    "type" : "r_source"
+}

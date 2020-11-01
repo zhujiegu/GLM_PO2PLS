@@ -1,0 +1,25 @@
+{
+    "collab_server" : "",
+    "contents" : "",
+    "created" : 1604264133920.000,
+    "dirty" : false,
+    "encoding" : "UTF-8",
+    "folds" : "",
+    "hash" : "0",
+    "id" : "E8C5A30D",
+    "lastKnownWriteTime" : 1604263031,
+    "last_content_update" : 1604263031,
+    "path" : "~/Mygit/Supervised_PO2PLS/PO2PLS_functions.R",
+    "project_path" : "PO2PLS_functions.R",
+    "properties" : {
+        "cursorPosition" : "254,0",
+        "scrollLine" : "251"
+    },
+    "read_only" : false,
+    "read_only_alternatives" : [
+    ],
+    "relative_order" : 8,
+    "source_on_save" : false,
+    "source_window" : "",
+    "type" : "r_source"
+}

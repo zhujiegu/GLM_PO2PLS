@@ -1,0 +1,229 @@
+---
+title: "Supervised PO2PLS"
+author: "Gabriel N-L"
+date: "20/01/2020"
+output: html_document
+---
+
+```{r}
+set.seed(1966)
+require(matrixcalc)
+```
+
+Before beginning to create / test the EM algorithm, I will take a subset of the RNA-seq dataset to test on. I will also create a binary vector for the outcome. 
+```{r}
+data <- load("~/Desktop/Thesis/pre_o2pls.RData")
+
+z <- matrix(0, nrow = 23, ncol = 1)
+z[11:23,] <- 1
+
+test_x <- x[ , 1:15]
+test_y <- y[ , 1:10]
+colnames(test_x) <- NULL
+rownames(test_x) <- NULL
+colnames(test_y) <- NULL
+rownames(test_y) <- NULL
+
+p <- ncol(test_x)
+q <- ncol(test_y)
+r <- 2
+rx <- 1
+ry <- 1
+
+W <- matrix(rnorm(p*r), nrow = p, ncol = r)
+Ws <- matrix(rnorm(p*rx), nrow = p, ncol = rx)
+C <- matrix(rnorm(q*r), nrow = q, ncol = r)
+Cs <- matrix(rnorm(q*rx), nrow = q, ncol = rx)
+B <- diag(sort(abs(rnorm(r))), nrow = r) # sort for first comp, abs for sign, nrow=r for r=1
+a <- matrix(rnorm(r), nrow = 1, ncol = r)
+b <- matrix(rnorm(r), nrow = 1, ncol = r)
+SigT <- diag(r)
+SigTs <- diag(rx)
+SigUs <- diag(ry)
+sig2e <- 1
+sig2f <- 1
+sig2g <- 1
+sigH <- diag(r)
+SigU = SigT%*%B^2 + sig2h*diag(r)
+
+params_current <- list(W = W, Ws = Ws, C = C, Cs = Cs, B = B, a = a, b = b, SigT = SigT, SigTs = SigTs, SigU = SigU, SigUs = SigUs, sig2e = sig2e, sig2f = sig2f, sig2g = sig2g, sigH = sigH)
+params_init<-params_current
+```
+
+
+
+```{r}
+e_step_W <- function (x, y, z, params_current){
+  #extract the parameters 
+  W <- params_current$W
+  Ws <- params_current$Ws
+  C <- params_current$C
+  Cs <- params_current$Cs
+  B <- params_current$B
+  a <- params_current$a
+  b <- params_current$b
+  SigT <- params_current$SigT
+  SigTs <- params_current$SigTs
+  SigU <- params_current$SigU
+  SigUs <- params_current$SigUs
+  sig2e <- params_current$sig2e
+  sig2f <- params_current$sig2f
+  sig2g<- params_current$sig2g
+  sigH <- params_current$sigH
+  
+  #dimensions
+  N <- nrow(x)
+  p <- nrow(W)
+  q <- nrow(C)
+  r <- ncol(W)
+  rx <- ncol(Ws)
+  ry <- ncol(Cs)
+  
+  #concatenated data matrix, required for each of the conditional expectations in the e step: 
+  xyz <- cbind(x, y, z)
+  
+  #general covariance matrix Sigma (p+q+1)x(p+q+1): needs to be inverted. This will currently take a lot of time if the following method is used
+  Sig_top <- cbind(W%*%SigT%*%t(W) + Ws%*%SigTs%*%t(Ws) + sig2e*diag(p), W%*%SigT%*%B%*%t(C), W%*%SigT%*%t(a) + W%*%SigT%*%B%*%t(b))
+  Sig_mid <- cbind(C%*%B%*%SigT%*%t(W), C%*%SigU%*%t(C) + Cs%*%SigUs%*%t(Cs) + sig2f*diag(q), C%*%SigT%*%B%*%t(a) + C%*%SigU%*%t(b))
+  Sig_bot <- cbind(a%*%SigT%*%t(W) + b%*%B%*%SigT%*%t(W), a%*%B%*%SigT%*%t(C) + b%*%SigU%*%t(C), a%*%SigT%*%t(a) + b%*%SigU%*%t(b) + 2*a%*%B%*%SigT%*%t(b) + sig2g)
+  Sig <- rbind(Sig_top, Sig_mid, Sig_bot)
+  invSig <- MASS::ginv(Sig)
+  
+  #the other covariances needed to derive the conditional expectations
+  cov_xyz_t <- rbind(W%*%SigT, C%*%B%*%SigT, t(a)%*%SigT + t(b)%*%SigT%*%B)
+  mu_t <- xyz%*%invSig%*%cov_xyz_t
+  
+  #similarly, for mu_ts
+  cov_xyz_ts <- rbind(Ws%*%SigTs, matrix(0, nrow = q+1, ncol = rx))
+  mu_ts <- xyz%*%invSig%*%cov_xyz_ts
+  
+  #mu_u
+  cov_xyz_u <- rbind(W%*%SigT%*%B, C%*%SigU, t(a)%*%SigT%*%B + t(b)%*%SigU)
+  mu_u <- xyz%*%invSig%*%cov_xyz_u
+  
+  #mu_us
+  cov_xyz_us <- rbind(matrix(0, nrow = p, ncol = ry), Cs%*%SigUs, matrix(0, nrow = 1, ncol = ry))
+  mu_us <- xyz%*%invSig%*%cov_xyz_us
+  
+  #now for the rest
+  S_tt <- SigT - t(cov_xyz_t)%*%invSig%*%cov_xyz_t
+  S_tts <-  -t(cov_xyz_t)%*%invSig%*%cov_xyz_ts 
+  S_tsts <- SigTs - t(cov_xyz_ts)%*%invSig%*%cov_xyz_ts
+  S_uu <- SigU - t(cov_xyz_u)%*%invSig%*%cov_xyz_u
+  S_uus <- -t(cov_xyz_u)%*%invSig%*%cov_xyz_us
+  S_usus <- SigUs - t(cov_xyz_us)%*%invSig%*%cov_xyz_us
+  S_tu <- SigT%*%B - t(cov_xyz_t)%*%invSig%*%cov_xyz_u
+
+  loglik = N*(p+q+1)*log(2*pi) + N*log(det(Sig)) + matrix.trace(crossprod(xyz)%*%invSig)
+  loglik = -loglik/2
+  
+  return(list(mu_t = mu_t, mu_ts = mu_ts, mu_u = mu_u, mu_us = mu_us, S_tt = S_tt, S_tts = S_tts, S_tsts = S_tsts, S_uu = S_uu, S_uus = S_uus, S_usus = S_usus, S_tu = S_tu, logl = loglik))
+}
+
+#result <- e_step_W(x=test_x, y=test_y, z=z, params_current = params_current)
+#result
+
+```
+
+
+M step: here, I will try out the M step. 
+```{r}
+m_step_W <- function (e_step_W, x, y, z, params_current) {
+  #e_step_W is the output (List) from implementing the e-step, i.e. e_step_W <- e_step(...), and estimating the various required conditional expectations
+  #retrieve parameters
+  W <- params_current$W
+  Ws <- params_current$Ws
+  C <- params_current$C
+  Cs <- params_current$Cs
+  B <- params_current$B
+  a <- params_current$a
+  b <- params_current$b
+  SigT <- params_current$SigT
+  SigTs <- params_current$SigTs
+  SigU <- params_current$SigU
+  SigUs <- params_current$SigUs
+  sig2e <- params_current$sig2e
+  sig2f <- params_current$sig2f
+  sig2g<- params_current$sig2g
+  p <- nrow(W)
+  q <- nrow(C)
+  # the m step for W, Ws and sigma2e requires the following conditional expectations: 
+  mu_t <- e_step_W$mu_t
+  mu_ts <- e_step_W$mu_ts
+  mu_u <- e_step_W$mu_u
+  mu_us <- e_step_W$mu_us
+  S_tt <- e_step_W$S_tt
+  S_tts <- e_step_W$S_tts
+  S_tsts <- e_step_W$S_tsts
+  S_uu <- e_step_W$S_uu
+  S_uus <- e_step_W$S_uus
+  S_usus <- e_step_W$S_usus
+  S_tu <- e_step_W$S_tu
+  
+  #now calculate the maximum likelihood estimates for W, Ws and sigma2e
+  W_hat <- OmicsPLS::orth( (t(x) %*% mu_t - Ws %*% t(S_tts)) ) #%*% MASS::ginv(S_tt)
+  
+  # #does this need to be W in here or W_hat???
+  Ws_hat <- OmicsPLS::orth( (t(x) %*% mu_ts - W %*% S_tts) ) #%*% MASS::ginv(S_tsts)
+
+  sig2e_hat <- matrix.trace(t(x)%*%x -2*t(x) %*% mu_t %*% t(W) -2*t(x)%*%mu_ts %*% t(Ws) + W %*% S_tt %*% t(W) + 2*W %*% S_tts %*% t(Ws) + Ws %*% S_tsts %*% t(Ws)) / p
+
+  C_hat <- OmicsPLS::orth( (t(y) %*% mu_u - Cs %*% t(S_uus)) )#%*% MASS::ginv(S_uu)
+
+  #does this need to be C in here or C_hat??? C_hat
+  Cs_hat <- OmicsPLS::orth( (t(y) %*% mu_us - C %*% S_uus) ) #%*% MASS::ginv(S_usus)
+
+  sig2f_hat <- matrix.trace(t(y)%*%y -2*t(y) %*% mu_u %*% t(C) -2*t(y)%*%mu_us %*% t(Cs) + C %*% S_uu %*% t(C) + 2*C %*% S_uus %*% t(Cs) + Cs %*% S_usus %*% t(Cs)) / q
+
+   a_hat <- MASS::ginv(S_tt)%*%(t(mu_t)%*%z - S_tu%*%b)
+
+   b_hat <- MASS::ginv(S_uu)%*%(t(mu_u)%*%z - S_tu%*%a)
+
+   sig2g_hat <- matrix.trace(t(z)%*%z - 2*t(z)%*%mu_t%*%a - 2*t(z)%*%mu_u%*%b + t(a)%*%S_tt%*%a + t(b)%*%S_uu%*%b + 2*t(a)%*%S_tu%*%b)
+
+  B_hat <- (t(mu_u)%*%mu_t)%*%MASS::ginv(S_tt)
+
+  sig2h_hat <- matrix.trace(t(mu_u)%*%mu_u - 2*t(mu_u)%*%mu_t%*%B + t(B)%*%S_tt%*%B) / r
+
+  
+  #### WRONG
+  SigT_hat <- var(mu_t)
+
+  #here i have used all the new values to calculate SigU_hat
+  SigU_hat <- SigT_hat%*%B_hat^2 + sig2h_hat*diag(r)
+
+  SigTs_hat <- var(mu_ts)
+
+  SigUs_hat <- var(mu_us)
+  
+# return(list(W_hat = W_hat, Ws_hat = Ws_hat, C_hat = C_hat, Cs_hat = Cs_hat, B_hat = B_hat, a_hat = a_hat, b_hat = b_hat, SigT_hat = SigT_hat, sigTs_hat = SigTs_hat, SigU_hat = SigU_hat, SigUs_hat = SigUs_hat, sig2e_hat = sig2e_hat, sig2f_hat = sig2f_hat, sig2g_hat = sig2g_hat, sig2h_hat = sig2h_hat))
+# }
+return(list(W_hat = W_hat, Ws_hat = Ws, C_hat = C, Cs_hat = Cs, B_hat = B, a_hat = a, b_hat = b, SigT_hat = SigT, SigTs_hat = SigTs, SigU_hat = SigU, SigUs_hat = SigUs, sig2e_hat = sig2e, sig2f_hat = sig2f, sig2g_hat = sig2g, sig2h_hat = sig2h))
+}
+
+#res <- m_step_W(e_step_W = result, x=test_x, y=test_y, z=z, params_current = params_current)
+```
+
+
+```{r}
+EM <- function(x, y, z, params_current, iterations){
+  #solve(t(0))
+  logl <- NA*(1:iterations)
+  for (i in 1:iterations){
+    E <- e_step_W(x=x, y=y, z=z, params_current = params_current)
+    M <- m_step_W(e_step_W = E, x=x, y=y, z=z, params_current = params_current)
+    logl[i] <- E$logl
+    #params_relevant <- list(W = params_current[[1]], Ws = params_current[[2]], sigma2e = params_current[[12]])
+    
+    for (i in 1:length(params_current)){
+      if (all.equal(M[[i]], params_current[[i]])==TRUE){
+        (params_current[[i]] <- params_current[[i]])
+      } else {
+        params_current[[i]] <- M[[i]]
+      }}
+  }
+  return(list(params_current, loglik = logl))
+}
+
+fit <- EM(x = test_x, y = test_y, z = z, params_current = params_current, iterations = 50)
+```
