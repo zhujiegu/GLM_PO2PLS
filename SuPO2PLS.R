@@ -69,8 +69,8 @@ generate_params <- function(X, Y, Z, r, rx, ry, alpha = 0.1, type=c('o2m','rando
       a = matrix(rnorm(r), nrow = 1, ncol = r),
       b = matrix(rnorm(r), nrow = 1, ncol = r)
     )
-    outp$SigH = diag(alpha/(1-alpha)*(mean(diag(outp$SigT%*%outp$B))),r) #cov(H_UT)*diag(1,r),
-    outp$SigU <- with(outp, SigT %*% B + SigH)
+    outp$SigH = diag(alpha/(1-alpha)*(diag(outp$SigT%*%outp$B^2)), r) #cov(H_UT)*diag(1,r),
+    outp$SigU <- with(outp, SigT %*% B^2 + SigH)
     return(with(outp, {
       c(outp,
         sig2E = alpha/(1-alpha)*(mean(diag(SigT)) + mean(diag(SigTo)))/p,
@@ -104,7 +104,6 @@ generate_data <- function(N, params, distr = rnorm){
   r = ncol(W)
   rx = ncol(Wo)
   ry = ncol(Co)
-  
   Gamma = rbind(cbind(W, matrix(0,p,r), Wo, matrix(0,p,ry)),
                 cbind(matrix(0,q,r), C, matrix(0,q,rx), Co),
                 cbind(a, b, matrix(0,1,rx+ry)))
@@ -215,18 +214,18 @@ E_step <- function(X, Y, Z, params){
   # print(Mtilde)
   # print(GGef)
   # print(SigmaM)
-  mu_T <- EE[,1:r]
-  mu_U <- EE[,(r+1):(2*r)]
-  mu_To <- EE[,(2*r+1):(2*r+rx)]
-  mu_Uo <- EE[,(2*r+rx+1):(2*r+rx+ry)]
-  Stt <- ET[1:r,1:r] + crossprod(mu_T)/N
-  Suu <- ET[(r+1):(2*r), (r+1):(2*r)] + crossprod(mu_U)/N
-  Stoto <- ET[(2*r+1):(2*r+rx), (2*r+1):(2*r+rx)] + crossprod(mu_To)/N
-  Suouo <- ET[(2*r+rx+1):(2*r+rx+ry), (2*r+rx+1):(2*r+rx+ry)] + crossprod(mu_Uo)/N
-  Stu <- ET[1:r, (r+1):(2*r)] + crossprod(mu_T,mu_U)/N
-  Stto <- ET[1:r, (2*r+1):(2*r+rx)] + crossprod(mu_T, mu_To)/N
-  Suto <- ET[(r+1):(2*r), (2*r+1):(2*r+rx)] + crossprod(mu_U, mu_To)/N
-  Suuo <- ET[(r+1):(2*r), (2*r+rx+1):(2*r+rx+ry)] + crossprod(mu_U, mu_Uo)/N
+  mu_T <- EE[,1:r,drop=FALSE]
+  mu_U <- EE[,(r+1):(2*r),drop=FALSE]
+  mu_To <- EE[,(2*r+1):(2*r+rx),drop=FALSE]
+  mu_Uo <- EE[,(2*r+rx+1):(2*r+rx+ry),drop=FALSE]
+  Stt <- ET[1:r,1:r,drop=FALSE] + crossprod(mu_T)/N
+  Suu <- ET[(r+1):(2*r), (r+1):(2*r),drop=FALSE] + crossprod(mu_U)/N
+  Stoto <- ET[(2*r+1):(2*r+rx), (2*r+1):(2*r+rx),drop=FALSE] + crossprod(mu_To)/N
+  Suouo <- ET[(2*r+rx+1):(2*r+rx+ry), (2*r+rx+1):(2*r+rx+ry),drop=FALSE] + crossprod(mu_Uo)/N
+  Stu <- ET[1:r, (r+1):(2*r),drop=FALSE] + crossprod(mu_T,mu_U)/N
+  Stto <- ET[1:r, (2*r+1):(2*r+rx),drop=FALSE] + crossprod(mu_T, mu_To)/N
+  Suto <- ET[(r+1):(2*r), (2*r+1):(2*r+rx),drop=FALSE] + crossprod(mu_U, mu_To)/N
+  Suuo <- ET[(r+1):(2*r), (2*r+rx+1):(2*r+rx+ry),drop=FALSE] + crossprod(mu_U, mu_Uo)/N
   
   ## Calculate cond mean of E,F,G,H
   # invS_covEF <- diag(1,p+q) - invEF_Gamma %*% invZtilde %*% t(Gamma)
@@ -273,9 +272,22 @@ E_step <- function(X, Y, Z, params){
   # Chh <- Chh - t(covH) %*% covHEFG
   # Chh <- Chh + (t(covH) %*% GammaEFG %*% Mtilde) %*% (t(Gamma) %*% covHEFG)
   # Chh <- Chh + crossprod(mu_H) / N
+  # 
+  # Cgg_old <- as.numeric(crossprod(Z)/N - 2*t(Z)%*%mu_T%*%t(a)/N -2*t(Z)%*%mu_U%*%t(b)/N +
+  #   a%*%Stt%*%t(a) + 2*a%*%Stu%*%t(b) + b%*%Suu%*%t(b))
   
-  Cgg <- as.numeric(crossprod(Z)/N - 2*t(Z)%*%mu_T%*%t(a)/N -2*t(Z)%*%mu_U%*%t(b)/N + 
-    a%*%Stt%*%t(a) + 2*a%*%Stu%*%t(b) + b%*%Suu%*%t(b))
+  # (a,b) -> A
+  aabb <- cbind(a,b)
+  Sttuu <- rbind(cbind(Stt, Stu),
+                 cbind(t(Stu), Suu))
+  Cgg <- as.numeric(crossprod(Z)/N - 2*t(Z)%*%cbind(mu_T,mu_U)%*%t(aabb)/N +
+                          aabb%*%Sttuu%*%t(aabb))
+  
+  # print(all.equal(Cgg,Cgg_old))
+  # a+bB -> a
+  # Cgg <- as.numeric(crossprod(Z)/N - 2*t(Z)%*%mu_T%*%t(a)/N -2*t(Z)%*%(mu_U-mu_T%*%B)%*%t(b)/N +
+  #                     a%*%Stt%*%t(a) + 2*a%*%(Stu-Stt%*%B)%*%t(b) +
+  #                     b%*%(Suu - t(Stu)%*%B - t(B)%*%Stu + t(B)%*%Stt%*%B)%*%t(b))
   
   ## log of det SigmaXY, see matrix determinant lemma
   logdet <- log(det(diag(2*r+rx+ry) + GGef%*%SigmaM))+p*log(sig2E)+q*log(sig2F)
@@ -290,6 +302,16 @@ E_step <- function(X, Y, Z, params){
   # Sig <- rbind(cbind(W%*%SigT%*%t(W) + Wo%*%SigTo%*%t(Wo) + sig2E*diag(p), W%*%SigT%*%B%*%t(C), W%*%SigT%*%(t(a) + B%*%t(b))),
   #              cbind(C%*%B%*%SigT%*%t(W), C%*%SigU%*%t(C) + Co%*%SigUo%*%t(Co) + sig2F*diag(q), C%*%SigT%*%B%*%t(a) + C%*%SigU%*%t(b)),
   #              cbind((a+b%*%B)%*%SigT%*%t(W), a%*%B%*%SigT%*%t(C) + b%*%SigU%*%t(C), a%*%SigT%*%t(a) + b%*%SigU%*%t(b) + 2*a%*%B%*%SigT%*%t(b) + sig2G))
+  # 
+  # invSig <- MASS::ginv(Sig)
+  # loglik_test = N*(p+q+1)*log(2*pi) + N*log(det(Sig)) + sum(diag((crossprod(dataXYZ)%*%invSig)))
+  # loglik_test = -loglik_test/2
+  # print(all.equal(loglik, loglik_test))
+  
+  # Direct log-likelihood a+bB -> a
+  # Sig <- rbind(cbind(W%*%SigT%*%t(W) + Wo%*%SigTo%*%t(Wo) + sig2E*diag(p), W%*%SigT%*%B%*%t(C), W%*%SigT%*%t(a)),
+  #              cbind(C%*%B%*%SigT%*%t(W), C%*%SigU%*%t(C) + Co%*%SigUo%*%t(Co) + sig2F*diag(q), C%*%(SigH%*%t(b) + B%*%SigT%*%t(a))),
+  #              cbind(a%*%SigT%*%t(W), (a%*%SigT%*%B+b%*%SigH)%*%t(C), a%*%SigT%*%t(a) + b%*%SigH%*%t(b) + sig2G))
   # 
   # invSig <- MASS::ginv(Sig)
   # loglik_test = N*(p+q+1)*log(2*pi) + N*log(det(Sig)) + sum(diag((crossprod(dataXYZ)%*%invSig)))
@@ -316,7 +338,10 @@ E_step <- function(X, Y, Z, params){
     Sff = Cff,
     Sgg = Cgg,
     Shh = Chh,
-    loglik = loglik
+    loglik = loglik,
+    EE = EE,
+    GammaEFG = GammaEFG,
+    Mtilde=Mtilde
   )
 }
 
@@ -334,6 +359,7 @@ M_step <- function(E_fit, params, X, Y, Z, orth_type = c("SVD","QR")){
     
     params$B = t(Stu) %*% MASS::ginv(Stt) * diag(1,r)
     params$SigT = Stt*diag(1,r)
+    params$SigU = Suu*diag(1,r)
     params$SigTo = Stoto*diag(1,rx)
     params$SigUo = Suouo*diag(1,ry)
     params$SigH = Shh*diag(1,r)#abs(Suu - 2*Sut%*%params_old$B + Stt%*%params_old$B^2)
@@ -349,51 +375,39 @@ M_step <- function(E_fit, params, X, Y, Z, orth_type = c("SVD","QR")){
     params$Wo = suppressWarnings(orth_x*orth(t(X/N) %*% mu_To - params$W%*%Stto,type = orth_type))#%*%MASS::ginv(Stoto)
     params$Co = suppressWarnings(orth_y*orth(t(Y/N) %*% mu_Uo - params$C%*%Suuo,type = orth_type))#%*%MASS::ginv(Suouo)
     
-    # a_pre <- params$a
+    # params$a = (t(Z/N)%*%mu_T - params$b%*%Stu) %*% MASS::ginv(Stt*diag(1,r))
+    # params$b = (t(Z/N)%*%mu_U - params$a%*%t(Stu)) %*% MASS::ginv(Suu*diag(1,r))
+    
+    # a + bB -> a
+    # params$a = (t(Z/N)%*%mu_T - params$b%*%(Stu-Stt%*%B)) %*% MASS::ginv(Stt*diag(1,r))
+    # params$b = (t(Z/N)%*%(mu_U-mu_T%*%B) - params$a%*%(Stu-Stt%*%B)) %*% MASS::ginv(Shh*diag(1,r))
+    
+    # A = (a,b)
+    Sttuu <- rbind(cbind(Stt*diag(1,r), Stu),
+                   cbind(t(Stu), Suu*diag(1,r)))
+    aabb <- t(Z/N) %*% cbind(mu_T,mu_U) %*% MASS::ginv(Sttuu)
+    params$a = aabb[,1:r, drop=FALSE]
+    params$b = aabb[,r+1:r, drop=FALSE]
 
-    params$a = (t(Z/N)%*%mu_T - params$b%*%Stu) %*% MASS::ginv(Stt)
+    # # Try correct order
+    # # browser()
+    # signB <- sign(diag(params$B))
+    # params$B <- params$B %*% diag(signB,r)
+    # params$C <- params$C %*% diag(signB,r)
+    # params$b <- params$b %*% diag(signB,r)
+    # ordSB <- order(diag(params$SigT %*% params$B), decreasing = TRUE)
+    # params$B <- params$B[,ordSB, drop=FALSE]
+    # params$W <- params$W[,ordSB, drop=FALSE]
+    # params$C <- params$C[,ordSB, drop=FALSE]
+    # params$a <- params$a[,ordSB, drop=FALSE]
+    # params$b <- params$b[,ordSB, drop=FALSE]
+    # params$SigT <- params$SigT[,ordSB, drop=FALSE]
+    # params$SigU <- params$SigU[,ordSB, drop=FALSE]
+    # params$SigH <- params$SigH[,ordSB, drop=FALSE]
+
     # params$a = matrix(rep(0, r), nrow = 1, ncol=r)
-    params$b = (t(Z/N)%*%mu_U - params$a%*%t(Stu)) %*% MASS::ginv(Suu)
     # params$b = matrix(rep(0, r), nrow = 1, ncol=r)
-    # print(params$a)
-    # print(params$b)
-    # print("------------")
-    
-    
-    # print(t(Z/N)%*%mu_T)
-    # print("------------")
-    # print(params$b);print(Stu)
-    # print("------------")
-    # print(MASS::ginv(Stt))
-    # params$abbug = list(Z=Z,mu_T=mu_T,Stu=Stu,Stt=Stt)
-    
-    # print(params$a)
-    # print(t(Z/N)%*%mu_U)
-    # print("------------")
-    # print(params$a%*%t(Stu))
-    # print("------------")
-    # print(MASS::ginv(Suu))
-    # params$abbug = list(Z=Z,mu_T=mu_T,Stu=Stu,Stt=Stt)
-    
-    # # Debugging
-    # params$B = t(Stu) %*% MASS::ginv(Stt) * diag(1,r)
-    # params$SigT = Stt*diag(1,r)
-    # params$SigTo = params$SigTo
-    # params$SigUo = params$SigUo
-    # params$SigH = params$SigH
-    # params$sig2E = params$sig2E
-    # params$sig2F = params$sig2F
-    # params$sig2G = params$sig2G
-    # 
-    # params$W = params$W
-    # params$C = params$C
-    # 
-    # params$Wo = params$Wo
-    # params$Co = params$Co
-    # 
-    # params$a = params$a
-    # params$b = params$b
-    
+
     return(params)
   })
 }
@@ -418,7 +432,7 @@ diagnostics.PO2PLS <- function(th, th0){
 }
 
 #' @export
-Su_PO2PLS <- function(X, Y, Z, r, rx, ry, steps = 1e5, tol = 1e-6, init_param='random',
+Su_PO2PLS <- function(X, Y, Z, r, rx, ry, steps = 1e5, tol = 1e-6, init_param= c('random','o2m'),
                    orth_type = "SVD", random_restart = FALSE){
   # if(all(c("W","Wo","C","Co","B","SigT","SigTo","SigUo","SigH","sig2E","sig2F") %in% names(init_param))) {cat('using old fit \n'); params <- init_param}
   # else {params <- generate_params(X, Y, Z, r, rx, ry, type = init_param)}
@@ -469,6 +483,7 @@ Su_PO2PLS <- function(X, Y, Z, r, rx, ry, steps = 1e5, tol = 1e-6, init_param='r
       
       #debug
       if(is.na(logl[i+1])) browser()
+      # if(logl[i+1] < logl[i]) browser()
       
       if(i > 1 && abs(logl[i+1]-logl[i]) < tol) break
       if(i %in% c(1e1, 1e2, 1e3, 5e3, 1e4, 4e4)) {
@@ -476,7 +491,13 @@ Su_PO2PLS <- function(X, Y, Z, r, rx, ry, steps = 1e5, tol = 1e-6, init_param='r
       }
       if(logl[i+1] > max(logl[1:i])) params_max <- params_next
       params = params_next
-      debug_list[[i]] <- params
+      
+      debug_list[[i]] <- list(Cor=cor(cbind(E_next$mu_T,E_next$mu_U)),
+                              aa=params_next$a,
+                              bb=params_next$b,
+                              sig2G=params_next$sig2G,
+                              Sttuu=with(E_next, rbind(cbind(2*Stt*diag(1,r), Stu+t(Stu)),
+                                             cbind(Stu+t(Stu), 2*Suu*diag(1,r)))))
     }
     if(!any(diff(logl[-1]) < -1e-10) | !random_restart_original) {
       random_restart = FALSE
@@ -490,11 +511,17 @@ Su_PO2PLS <- function(X, Y, Z, r, rx, ry, steps = 1e5, tol = 1e-6, init_param='r
   signB <- sign(diag(params$B))
   params$B <- params$B %*% diag(signB,r)
   params$C <- params$C %*% diag(signB,r)
+  params$b <- params$b %*% diag(signB,r)
   ordSB <- order(diag(params$SigT %*% params$B), decreasing = TRUE)
+  params$B <- params$B[,ordSB]
   params$W <- params$W[,ordSB]
   params$C <- params$C[,ordSB]
-
-  print("a,b change order as well")
+  params$a <- params$a[,ordSB]
+  params$b <- params$b[,ordSB]
+  params$SigT <- params$SigT[,ordSB]
+  params$SigU <- params$SigU[,ordSB]
+  params$SigH <- params$SigH[,ordSB]
+  
   message("Nr steps was ", i)
   message("Negative increments: ", any(diff(logl[1:i+1]) < 0), "\n",
           "Smallest increments: ", min(diff(logl[1:i+1])),

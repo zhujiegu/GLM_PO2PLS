@@ -1,0 +1,282 @@
+---
+title: "Pre-O2PLS analysis for RNA and ChIP seq - Version 2"
+author: Zhujie Gu
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, fig.width = 12, fig.height = 8)
+library(OmicsPLS)
+library(magrittr)
+mean_var <- function(x, title = "Mean-variance trend"){
+  sx <- apply(x, 1, mean)
+  sy <- apply(x, 1, sd)
+  sy <- sqrt(sy)
+  
+  l <- lowess(sx, sy, f= 0.5)
+  plot(sx, sy, xlab = "log2( count size + 1 )", ylab = "Sqrt( standard deviation )", 
+       pch = 16, cex = 0.25)
+  title(paste(title))
+  lines(l, col = "red")
+}
+```
+
+## The datasets
+
+The datasets includes three parts: RNA-seq, ChIP-seq and clinical information.
+
+RNA-seq has 39 samples, 63677 genes; ChIP-seq has 25 samples, 33642 variables, location & length information; Each sample status is given in the clinical information as patient or control.
+
+```{r load data, echo=T, message=F}
+#######################################################################
+# read data
+#chip <- read.delim("./CHIP/HCM.merged.cod.in_3.coverages.tsv")
+chip <- read.delim("./CHIP/HCM.merged.cod.in_3.rpkm.coverages.tsv")
+
+library(data.table)
+library(tidyr)
+library(edgeR)
+library(org.Hs.eg.db)
+library(gridExtra)
+library(ggplot2)
+library(factoextra)
+setwd("./RNA")
+list_of_files <- list.files(recursive = T, pattern = "*.txt", full.names = F)
+
+# Read all the files and create a FileName column to store filenames
+rna <- rbindlist( sapply(list_of_files, fread, simplify = FALSE),
+                  use.names = TRUE, idcol = "FileName" )
+setwd("..")
+
+# spread long format to wide
+rna <- spread(rna, "FileName", V2)
+rm(list_of_files)
+
+#######################################################################
+# delete rows/columns which are not counting data
+chip <- chip[,-c(2:5)]
+rna <- rna[-c(1:5),]
+rna <- as.data.frame(rna)
+
+# set rownames
+row.names(chip) <- chip$id
+row.names(rna) <- rna$V1
+chip <- chip[,-1]
+rna <- rna[,-1]
+
+# extract sample ID and change to internal name (so two datasets are consistent)
+colnames_chip <- sapply(strsplit(colnames(chip), "_"), function(e) e[1])
+colnames_rna <- sapply(strsplit(colnames(rna), "_"), function(e) e[1])
+
+library(gdata)
+# group information
+info <- read.xls("HCM_controls_RNAseq_ChIPseq_Hae_Won_Uh-1.xlsx")
+info$Group <- sapply(strsplit(as.character(info$Group), "_"), function(e) e[1])
+
+# Standardize sample ID
+name_index_chip <- match(colnames_chip, info$Bam.H3K27ac.ChIPseq.Illumina)
+name_index_rna <- match(colnames_rna, info$Bam.RNAseq.Illumina)
+
+colnames(chip) <- info$Internal_Name[name_index_chip]
+colnames(rna) <- info$Internal_Name[name_index_rna]
+```
+
+## Filtering low-expressed genes
+
+As discussed, keeping about 15000 genes would be appropriate.
+
+```{r, rna filtering} 
+keep_rna <- rowSums(rna > 10) >= 2
+table(keep_rna)
+
+rna <- rna[keep_rna,]
+```
+
+
+
+
+
+## Preprocessing RNA:
+1. Get effective library size using TMM
+2. cpm with effective lib.siz and log2 tranformed
+
+```{r, preprocessing, echo=F}
+# Convert to matrix
+# rna <- as.matrix(rna)
+# chip <- as.matrix(chip)
+
+
+drop <- "HCM62MYBPC3SS"
+rna <- rna[,!(colnames(rna) %in% drop)]
+
+
+# Calculate the normalization factor(TMM)
+rna_norm_fac <- calcNormFactors(rna, method = "TMM")
+# chip_norm_fac <- calcNormFactors(chip, method = "TMM")
+
+# effective lib.size
+lib_siz_eff <- apply(rna, 2, sum) * rna_norm_fac
+
+# cpm
+rna_norm <- cpm(rna, lib.size = lib_siz_eff, log = T, prior.count = 1)
+
+# boxplot
+par(mfrow = c(2,1))
+boxplot(rna, axes = F, outline = F, main = "RNA"); axis(2)
+boxplot(rna_norm, axes = F, outline = T, main = "RNA_norm"); axis(2)
+par(mfrow = c(1,1))
+# 
+# par(mfrow = c(2,1))
+# mean_var(rna, "RNA Mean-variance trend")
+# mean_var(rna_norm, "RNA Mean-variance trend")
+# par(mfrow = c(1,1))
+```
+
+
+## Preprocessing ChIP:
+1. log2 tranformed
+```{r, preprocessing chip, echo=F}
+# Convert to matrix
+# rna <- as.matrix(rna)
+ chip <- as.matrix(chip)
+
+# log2
+chip_norm <- log2(chip+1)
+colnames(chip_norm) <- colnames(chip)
+
+# boxplot
+par(mfrow = c(2,1))
+boxplot(chip, axes = F, outline = F, main = "ChIP"); axis(2)
+boxplot(chip_norm, axes = F, outline = T, main = "ChIP_norm"); axis(2)
+par(mfrow = c(1,1))
+```
+
+## Find overlapping samples
+
+```{r remove subjects, include = T, echo = T}
+# Remove samples which are not in both datasets
+# Without quantile normalization
+rrm_rna <- which(!(colnames(rna) %in% colnames(chip)))
+rrm_chip <- which(!(colnames(chip) %in% colnames(rna)))
+
+rna_new <- rna_norm[,rrm_rna]
+rna <- rna_norm[,-rrm_rna]
+
+#x_new <- rna_norm_log[,rrm_rna]
+#rna_norm_log_quan <- rna_norm_log_quan[,-rrm_rna]
+chip <- chip_norm[,-rrm_chip]
+#y_new <- chip_norm_log[,rrm_chip]
+#chip_norm_log_quan <- chip_norm_log_quan[,-rrm_chip]
+
+dim(rna); dim(chip)
+```
+
+There are 23 overlapping samples in total.
+
+# Now rna, chip are normalized overlapping samples. rna_new are normalized non-overlapping
+
+<!-- #### Score plot for RNA-seq -->
+
+<!-- ```{r PCA score plot for RNA-seq, fig.width = 14, fig.height = 4} -->
+
+<!-- # transpose -->
+<!-- rna_pca <- t(rna) -->
+
+<!-- # group information -->
+<!-- name_index_rna <- match(rownames(rna_pca), info$Internal_Name) -->
+<!-- groups <- info$Group[name_index_rna] -->
+
+<!-- # centering and PCA -->
+<!-- rnaPCA <- prcomp(scale(rna, scale = F)) -->
+
+<!-- grid.arrange(nrow = 1, ncol = 3, -->
+
+<!--              fviz_pca_ind(rnaPCA, axes = c(1,2), -->
+<!--              geom.ind = "point", # show points only (nbut not "text") -->
+<!--              col.ind = as.factor(groups), # color by groups -->
+<!--              addEllipses = TRUE, # Concentration ellipses -->
+<!--              legend.title = "Groups" -->
+<!--              ), -->
+
+<!--              fviz_pca_ind(rnaPCA, axes = c(2,3), -->
+<!--              geom.ind = "point", # show points only (nbut not "text") -->
+<!--              col.ind = as.factor(groups), # color by groups -->
+<!--              addEllipses = TRUE, # Concentration ellipses -->
+<!--              legend.title = "Groups" -->
+<!--              ), -->
+
+<!--              fviz_pca_ind(rnaPCA, axes = c(3,4), -->
+<!--              geom.ind = "point", # show points only (nbut not "text") -->
+<!--              col.ind = as.factor(groups), # color by groups -->
+<!--              addEllipses = TRUE, # Concentration ellipses -->
+<!--              legend.title = "Groups" -->
+<!--              ) -->
+<!-- ) -->
+<!-- ``` -->
+
+
+
+
+<!-- #### Score plot for ChIP-seq -->
+
+<!-- ```{r PCA score plot for ChIP-seq, fig.width = 14, fig.height = 4} -->
+<!-- # transpose and take log -->
+
+<!-- chip_pca <- t(chip) -->
+
+<!-- # group information -->
+<!-- name_index_chip <- match(rownames(chip_pca), info$Internal_Name) -->
+<!-- groups <- info$Group[name_index_chip] -->
+
+<!-- # centering and PCA -->
+<!-- chipPCA <- prcomp(scale(chip_pca, scale = F)) -->
+
+<!-- grid.arrange(nrow = 1, ncol = 3, -->
+
+<!--              fviz_pca_ind(chipPCA, axes = c(1,2), -->
+<!--              geom.ind = "point", # show points only (nbut not "text") -->
+<!--              col.ind = as.factor(groups), # color by groups -->
+<!--              addEllipses = TRUE, # Concentration ellipses -->
+<!--              legend.title = "Groups" -->
+<!--              ), -->
+
+<!--              fviz_pca_ind(chipPCA, axes = c(2,3), -->
+<!--              geom.ind = "point", # show points only (nbut not "text") -->
+<!--              col.ind = as.factor(groups), # color by groups -->
+<!--              addEllipses = TRUE, # Concentration ellipses -->
+<!--              legend.title = "Groups" -->
+<!--              ), -->
+
+<!--              fviz_pca_ind(chipPCA, axes = c(3,4), -->
+<!--              geom.ind = "point", # show points only (nbut not "text") -->
+<!--              col.ind = as.factor(groups), # color by groups -->
+<!--              addEllipses = TRUE, # Concentration ellipses -->
+<!--              legend.title = "Groups" -->
+<!--              ) -->
+<!-- ) -->
+<!-- ``` -->
+
+Notice that the outlier in the RNA-seq data is not in the ChIP-seq data. There is no outlier spotted in the ChIP-seq data. However, we can see from the score plots that the variance of the controls are much larger than patients, which verifies the fact that the controls are more diversed in this dataset.
+
+
+```{r O2PLS log data, echo=F}
+rna <- scale(t(as.matrix(rna)), scale = F)
+rna_new <- scale(t(as.matrix(rna_new)), scale = F)
+
+#x_new <- scale(t(x_new), scale = F)
+chip <- scale(t(chip), scale = F)
+#y_new <- scale(t(y_new), scale = F)
+# Order row names
+rna <- rna[order(rownames(rna)),]
+rna_new <- rna_new[order(rownames(rna_new)),]
+#x_new <- x_new[order(rownames(x_new)),]
+chip <- chip[order(rownames(chip)),]
+
+#y_new <- y_new[order(rownames(y_new)),]
+#save(chip, rna, rna_new,  file = "~/Mygit/Scripts/RNAsep_ChIPseq/pre_o2pls_v3.RData")
+```
+
+
+

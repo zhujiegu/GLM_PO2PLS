@@ -1,0 +1,26 @@
+{
+    "collab_server" : "",
+    "contents" : "",
+    "created" : 1604666553302.000,
+    "dirty" : true,
+    "encoding" : "UTF-8",
+    "folds" : "",
+    "hash" : "1929522355",
+    "id" : "F1B8AC11",
+    "lastKnownWriteTime" : 1604693451,
+    "last_content_update" : 1604741741173,
+    "path" : "~/Mygit/Supervised_PO2PLS/Debug.R",
+    "project_path" : "Debug.R",
+    "properties" : {
+        "cursorPosition" : "62,0",
+        "scrollLine" : "46",
+        "tempName" : "Untitled1"
+    },
+    "read_only" : false,
+    "read_only_alternatives" : [
+    ],
+    "relative_order" : 6,
+    "source_on_save" : false,
+    "source_window" : "",
+    "type" : "r_source"
+}
