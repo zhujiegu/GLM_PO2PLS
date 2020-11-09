@@ -504,25 +504,21 @@ Su_PO2PLS <- function(X, Y, Z, r, rx, ry, steps = 1e5, tol = 1e-6, init_param= c
   params$C <- params$C %*% diag(signB,r)
   params$b <- params$b %*% diag(signB,r)
   ordSB <- order(diag(params$SigT %*% params$B), decreasing = TRUE)
-  params$B <- params$B[,ordSB]
-  params$W <- params$W[,ordSB]
-  params$C <- params$C[,ordSB]
-  params$a <- params$a[,ordSB]
-  params$b <- params$b[,ordSB]
-  params$SigT <- params$SigT[,ordSB]
-  params$SigU <- params$SigU[,ordSB]
-  params$SigH <- params$SigH[,ordSB]
+  params$B <- params$B[ordSB,ordSB, drop=FALSE]
+  params$W <- params$W[,ordSB, drop=FALSE]
+  params$C <- params$C[,ordSB, drop=FALSE]
+  params$a <- params$a[,ordSB, drop=FALSE]
+  params$b <- params$b[,ordSB, drop=FALSE]
+  params$SigT <- params$SigT[ordSB,ordSB, drop=FALSE]
+  params$SigU <- params$SigU[ordSB,ordSB, drop=FALSE]
+  params$SigH <- params$SigH[ordSB,ordSB, drop=FALSE]
   
   message("Nr steps was ", i)
   message("Negative increments: ", any(diff(logl[1:i+1]) < 0), "\n",
           "Smallest increments: ", min(diff(logl[1:i+1])),
           "; Last increment: ", signif(logl[i+1]-logl[i],4))
   message("Log-likelihood: ", logl[i+1])
-  outputt <- list(params = params_next, logl = logl[0:i+1][-1], debug = debug_list)
+  outputt <- list(params = params, logl = logl[0:i+1][-1], debug = debug_list)
   class(outputt) <- "PO2PLS"
   return(outputt)
 }
-
-
-
-
