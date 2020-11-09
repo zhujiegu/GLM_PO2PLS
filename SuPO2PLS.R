@@ -1,20 +1,3 @@
-#' PO2PLS: Probabilistic Two-way Orthogonal Partial Least Squares
-#'
-#' This package implements the O2PLS method in a probabilistic framework.
-#' @author
-#' Said el Bouhaddani (\email{s.el_bouhaddani@@lumc.nl}),
-#' Jeanine Houwing-Duistermaat (\email{J.J.Houwing@@lumc.nl}),
-#' Geurt Jongbloed (\email{G.Jongbloed@@tudelft.nl}),
-#' Szymon Kielbasa (\email{S.M.Kielbasa@@lumc.nl}),
-#' Hae-Won Uh (\email{H.Uh@@lumc.nl}).
-#'
-#' Maintainer: Said el Bouhaddani (\email{s.el_bouhaddani@@lumc.nl}).
-#'
-#' @docType package
-#' @name PO2PLS-package
-#' @keywords Probabilistic-O2PLS
-#' @import OmicsPLS
-NULL
 
 #' @export
 blockm<-function(A,B,C)
@@ -272,14 +255,15 @@ E_step <- function(X, Y, Z, params){
   # Chh <- Chh - t(covH) %*% covHEFG
   # Chh <- Chh + (t(covH) %*% GammaEFG %*% Mtilde) %*% (t(Gamma) %*% covHEFG)
   # Chh <- Chh + crossprod(mu_H) / N
-  # 
-  # Cgg_old <- as.numeric(crossprod(Z)/N - 2*t(Z)%*%mu_T%*%t(a)/N -2*t(Z)%*%mu_U%*%t(b)/N +
-  #   a%*%Stt%*%t(a) + 2*a%*%Stu%*%t(b) + b%*%Suu%*%t(b))
-  
+
   # (a,b) -> A
-  aabb <- cbind(a,b)
   Sttuu <- rbind(cbind(Stt, Stu),
                  cbind(t(Stu), Suu))
+  aabb <- t(Z/N) %*% cbind(mu_T,mu_U) %*% MASS::ginv(Sttuu)
+  
+  aa = aabb[,1:r, drop=FALSE]
+  bb = aabb[,r+1:r, drop=FALSE]
+  
   Cgg <- as.numeric(crossprod(Z)/N - 2*t(Z)%*%cbind(mu_T,mu_U)%*%t(aabb)/N +
                           aabb%*%Sttuu%*%t(aabb))
   
@@ -338,6 +322,8 @@ E_step <- function(X, Y, Z, params){
     Sff = Cff,
     Sgg = Cgg,
     Shh = Chh,
+    aa=aa,
+    bb=bb,
     loglik = loglik,
     EE = EE,
     GammaEFG = GammaEFG,
@@ -363,6 +349,7 @@ M_step <- function(E_fit, params, X, Y, Z, orth_type = c("SVD","QR")){
     params$SigTo = Stoto*diag(1,rx)
     params$SigUo = Suouo*diag(1,ry)
     params$SigH = Shh*diag(1,r)#abs(Suu - 2*Sut%*%params_old$B + Stt%*%params_old$B^2)
+
     params$sig2E = See
     params$sig2F = Sff
     params$sig2G = Sgg
@@ -378,16 +365,19 @@ M_step <- function(E_fit, params, X, Y, Z, orth_type = c("SVD","QR")){
     # params$a = (t(Z/N)%*%mu_T - params$b%*%Stu) %*% MASS::ginv(Stt*diag(1,r))
     # params$b = (t(Z/N)%*%mu_U - params$a%*%t(Stu)) %*% MASS::ginv(Suu*diag(1,r))
     
+    params$a=aa
+    params$b=bb
+    
     # a + bB -> a
     # params$a = (t(Z/N)%*%mu_T - params$b%*%(Stu-Stt%*%B)) %*% MASS::ginv(Stt*diag(1,r))
     # params$b = (t(Z/N)%*%(mu_U-mu_T%*%B) - params$a%*%(Stu-Stt%*%B)) %*% MASS::ginv(Shh*diag(1,r))
     
     # A = (a,b)
-    Sttuu <- rbind(cbind(Stt*diag(1,r), Stu),
-                   cbind(t(Stu), Suu*diag(1,r)))
-    aabb <- t(Z/N) %*% cbind(mu_T,mu_U) %*% MASS::ginv(Sttuu)
-    params$a = aabb[,1:r, drop=FALSE]
-    params$b = aabb[,r+1:r, drop=FALSE]
+    # Sttuu <- rbind(cbind(Stt*diag(1,r), Stu),
+    #                cbind(t(Stu), Suu*diag(1,r)))
+    # aabb <- t(Z/N) %*% cbind(mu_T,mu_U) %*% MASS::ginv(Sttuu)
+    # params$a = aabb[,1:r, drop=FALSE]
+    # params$b = aabb[,r+1:r, drop=FALSE]
 
     # # Try correct order
     # # browser()
@@ -497,7 +487,8 @@ Su_PO2PLS <- function(X, Y, Z, r, rx, ry, steps = 1e5, tol = 1e-6, init_param= c
                               bb=params_next$b,
                               sig2G=params_next$sig2G,
                               Sttuu=with(E_next, rbind(cbind(2*Stt*diag(1,r), Stu+t(Stu)),
-                                             cbind(Stu+t(Stu), 2*Suu*diag(1,r)))))
+                                             cbind(Stu+t(Stu), 2*Suu*diag(1,r)))),
+                              ZTU=t(Z/N)%*%cbind(E_next$mu_T,E_next$mu_U))
     }
     if(!any(diff(logl[-1]) < -1e-10) | !random_restart_original) {
       random_restart = FALSE

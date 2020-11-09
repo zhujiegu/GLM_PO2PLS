@@ -1,3 +1,4 @@
+source('~/Mygit/Supervised_PO2PLS/SuPO2PLS.R')
 library(OmicsPLS)
 library(magrittr)
 

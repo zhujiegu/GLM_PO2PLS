@@ -1,8 +1,0 @@
-xxx <- matrix(c(3,5,3,7,9,3,234,4,5),3,3)
-xxx
-det(xxx)
-
-yyy <- blockm(xxx, matrix(c(0,0,0),3,1),0.00001)
-yyy
-
-det(yyy)
