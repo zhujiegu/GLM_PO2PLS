@@ -25,7 +25,7 @@ plot(cortu_plot[start:end], col="purple")
 plot(sig2G_plot)
 plot(fit$logl[start:end])
 
-# Plot t(Z/N) %*% mu_T, mu_U
+# Plot t(Z/N) %*% mu_T, mu_U  ``
 ZTU_plot <- sapply(fit$debug, function(e) e$ZTU)
 plot(ZTU_plot[1,start:end])
 plot(ZTU_plot[2,start:end], col = "red")
