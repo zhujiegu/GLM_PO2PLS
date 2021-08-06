@@ -1,10 +1,11 @@
 #' @export
-generate_params_su <- function(X, Y, Z, r, rx, ry, alpha_x = 0.1, alpha_y = 0.1, alpha_z = 0.1,
-                               alpha_tu = 0.1, B, a,b, type=c('o2m','random')){
+generate_params_bi <- function(X, Y, Z, r, rx, ry, alpha_x = 0.1, alpha_y = 0.1,
+                               alpha_tu = 0.1, a0=0,a=t(2),b=t(1), type=c('o2m','random')){
   type=match.arg(type)
   p = ifelse(is.matrix(X) | type != "random", ncol(X), X)
   q = ifelse(is.matrix(Y) | type != "random", ncol(Y), Y)
   if(type=="o2m"){
+    stop("use random now")
     fit <- o2m(X, Y, r, rx, ry, stripped=TRUE)
     return(with(fit, {
       x_tp <- cbind(Tt,U)
@@ -34,11 +35,12 @@ generate_params_su <- function(X, Y, Z, r, rx, ry, alpha_x = 0.1, alpha_y = 0.1,
       Wo = suppressWarnings(sign(rx)*orth(matrix(rnorm(p*max(1,rx)), p, max(1,rx))+seq(-p/2,p/2,length.out = p))),
       C = orth(matrix(rnorm(q*r), q, r)+1),
       Co = suppressWarnings(sign(ry)*orth(matrix(rnorm(q*max(1,rx)), q, max(1,ry))+seq(-q/2,q/2,length.out = q))),
-      B = diag(B, r),
+      B = diag(1, r),
       # B = diag(sort(runif(r,1,1),decreasing = TRUE),r), # set to 1 for simulation
       SigT = diag(sort(runif(r,1,3),decreasing = TRUE),r),
       SigTo = sign(rx)*diag(sort(runif(max(1,rx),1,3),decreasing = TRUE),max(1,rx)),
       SigUo = sign(ry)*diag(sort(runif(max(1,ry),1,3),decreasing = TRUE),max(1,ry)),
+      a0=a0,
       a = a,
       b = b
     )
@@ -47,14 +49,13 @@ generate_params_su <- function(X, Y, Z, r, rx, ry, alpha_x = 0.1, alpha_y = 0.1,
     return(with(outp, {
       c(outp,
         sig2E = alpha_x/(1-alpha_x)*(mean(diag(SigT)) + mean(diag(SigTo)))/p,
-        sig2F = alpha_y/(1-alpha_y)*(mean(diag(SigT%*%B^2 + SigH)) + mean(diag(SigUo)))/q,
-        sig2G = as.numeric(alpha_z/(1-alpha_z)*(a %*% SigT %*% t(a) + b %*% SigU %*% t(b))))
+        sig2F = alpha_y/(1-alpha_y)*(mean(diag(SigT%*%B^2 + SigH)) + mean(diag(SigUo)))/q)
     }))
   }
 }
 
 #' @export
-generate_data_su <- function(N, params, distr = rnorm){
+generate_data_bi <- function(N, params, distr = rnorm){
   W = params$W
   C = params$C
   Wo = params$Wo
@@ -67,10 +68,9 @@ generate_data_su <- function(N, params, distr = rnorm){
   sig2F = params$sig2F
   SigU = SigT%*%B^2 + SigH
   SigUo = params$SigUo + 1e-6*SigU[1]*(params$SigUo[1]==0)
+  a0= params$a0
   a = params$a
   b = params$b
-  sig2G = params$sig2G
-  
   
   p = nrow(W)
   q = nrow(C)
@@ -78,8 +78,7 @@ generate_data_su <- function(N, params, distr = rnorm){
   rx = ncol(Wo)
   ry = ncol(Co)
   Gamma = rbind(cbind(W, matrix(0,p,r), Wo, matrix(0,p,ry)),
-                cbind(matrix(0,q,r), C, matrix(0,q,rx), Co),
-                cbind(a, b, matrix(0,1,rx+ry)))
+                cbind(matrix(0,q,r), C, matrix(0,q,rx), Co))
   VarM = blockm(
     blockm(
       blockm(SigT, SigT%*%B, SigU),
@@ -96,10 +95,11 @@ generate_data_su <- function(N, params, distr = rnorm){
   M[,2*r+1:rx] <- sign(ssq(Wo))*M[,2*r+1:rx]
   M[,2*r+rx+1:ry] <- sign(ssq(Co))*M[,2*r+rx+1:ry]
   
-  EFG <- cbind(scale(matrix(rnorm(N*p), N))*sqrt(sig2E), 
-               scale(matrix(rnorm(N*q), N))*sqrt(sig2F),
-               scale(matrix(rnorm(N), N))*sqrt(sig2G))
-  
-  M %*% t(Gamma) + EFG
-  
+  EF <- cbind(scale(matrix(rnorm(N*p), N))*sqrt(sig2E), 
+               scale(matrix(rnorm(N*q), N))*sqrt(sig2F))
+
+  prob_z <- 1/(1+exp(-(a0 + M[,1:2*r]%*%t(cbind(a-b%*%B,b)))))
+  # print(cbind(M[,1:2*r],prob_z))
+  Z <- rbinom(N, 1, prob_z)
+  cbind(M %*% t(Gamma) + EF, Z)
 }

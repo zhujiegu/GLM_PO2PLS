@@ -1,4 +1,6 @@
-GH_Intl <- function(func, dim=2*r, level=6, x,y,z, params, plot_nodes=F){
+# func is the g(eta) in form int(g(eta)f(z|eta)f(x,y|eta)f(eta)d(eta))
+# set div_mrg to TRUE when divided by f(x,y,z)
+GH_Intl <- function(func, div_mrg=F, dim=2*r, level=6, x,y,z, params, plot_nodes=F){
   # standard GH rule
   rule <- fastGHQuad::gaussHermiteData(level)
 
@@ -38,23 +40,22 @@ GH_Intl <- function(func, dim=2*r, level=6, x,y,z, params, plot_nodes=F){
   # make list
   n_w <- lapply(seq_len(nrow(nodes)), function(i) list(n = nodes[i, ,drop=F], w = w[i]))
 
-  # calculate each node
-  tmp <- lapply(n_w, func, x=x,y=y,z=z, params=params)
-  # print(tmp[[1]])
-  # tmp <- lapply(1:level^dim, fun_h, nodes=nodes, w=w)
-  # sum over level^dim combos
-  result <- Reduce("+", tmp)
-  # print(result)
+  # the different part in the integral (g(eta))
+  l_part1 <- lapply(n_w, func, x=x,y=y,z=z, params=params)
+
+  # the common part in the integral
+  l_part2 <- lapply(n_w, fun_com, x=x,y=y,z=z, params=params)
   
-  # need fixing here
-  
-  tmp_com <- lapply(n_w, fun_com, x=x,y=y,z=z, params=params)
-  # tmp <- lapply(1:level^dim, fun_h, nodes=nodes, w=w)
-  # sum over level^dim combos
-  result_com <- Reduce("+", tmp_com)
-  # print(result_com)
-  
-  return(result/result_com)
+  # combine the two parts
+  l_result <- Map("*", l_part1, l_part2)
+
+  if(div_mrg){
+    mrg <- Reduce("+", l_part2)
+    result <- Reduce("+", l_result)/mrg
+  }else{
+    result <- Reduce("+", l_result)
+  }
+  return(result)
 }
 
 # # checking integral with covariance matrix
@@ -62,79 +63,56 @@ GH_Intl <- function(func, dim=2*r, level=6, x,y,z, params, plot_nodes=F){
 #   crossprod(i$n) * i$w
 # }
 
-# E(tu|xyz)
+# E(tu|xyz) without common part
 fun_mu <- function(i, x,y,z,params){
-  tu <- i$n
-  z_tu <- with(params, 
-               if(z==1){
-                 1/(1+exp(-(cbind(1,i$n) %*% t(params$alpha))))
-               }else{
-                 1/(1+exp((cbind(1,i$n) %*% t(params$alpha))))
-               }
-  ) %>% as.numeric()
-  
-  Sig_xt <- with(params, Wo %*% SigTo %*% t(Wo) + diag(sig2E,p))
-  x_t <- with(params,
-              (2*pi)^(-0.5*p) * det(Sig_xt)^(-0.5) *
-                exp(-0.5*(x-i$n[,1:r]%*%t(W))%*%solve(Sig_xt)%*%t((x-i$n[,1:r]%*%t(W))))
-  ) %>% as.numeric()
-  
-  Sig_yu <- with(params, Co %*% SigUo %*% t(Co) + diag(sig2F,q))
-  y_u <- with(params,
-              (2*pi)^(-0.5*q) * det(Sig_yu)^(-0.5) *
-                exp(-0.5*(y-i$n[,r+1:r]%*%t(C))%*%solve(Sig_yu)%*%t((y-i$n[,r+1:r]%*%t(C))))
-  ) %>% as.numeric()
-  return(tu *z_tu*x_t*y_u* i$w)
+  return(i$n)
 }
 
-# E(Sttuu|xyz)
+# E(Sttuu|xyz) without common part
 fun_S <- function(i, x,y,z,params){
-  Sttuu <- crossprod(i$n)
-  z_tu <- with(params, 
-               if(z==1){
-                 1/(1+exp(-(cbind(1,i$n) %*% t(params$alpha))))
-               }else{
-                 1/(1+exp((cbind(1,i$n) %*% t(params$alpha))))
-               }
-  ) %>% as.numeric()
-  
-  Sig_xt <- with(params, Wo %*% SigTo %*% t(Wo) + diag(sig2E,p))
-  x_t <- with(params,
-              (2*pi)^(-0.5*p) * det(Sig_xt)^(-0.5) *
-                exp(-0.5*(x-i$n[,1:r]%*%t(W))%*%solve(Sig_xt)%*%t((x-i$n[,1:r]%*%t(W))))
-  ) %>% as.numeric()
-  
-  Sig_yu <- with(params, Co %*% SigUo %*% t(Co) + diag(sig2F,q))
-  y_u <- with(params,
-              (2*pi)^(-0.5*q) * det(Sig_yu)^(-0.5) *
-                exp(-0.5*(y-i$n[,r+1:r]%*%t(C))%*%solve(Sig_yu)%*%t((y-i$n[,r+1:r]%*%t(C))))
-  ) %>% as.numeric()
-  return(Sttuu*z_tu*x_t*y_u*i$w)
+  return(crossprod(i$n))
 }
 
+fun_1 <- function(i, x,y,z,params){
+  return(1)
+}
 
 #################
-# isolates this part for computational efficiency later
+# common part of every integral
 # f(z|tu) * f(x|t) * f(y|u)
 fun_com <- function(i, x,y,z,params){
+  alpha <- with(params, cbind(a0,a-b%*%B,b))
   z_tu <- with(params, 
                if(z==1){
-                 1/(1+exp(-(cbind(1,i$n) %*% t(params$alpha))))
+                 1/(1+exp(-(cbind(1,i$n) %*% t(alpha))))
                }else{
-                 1/(1+exp((cbind(1,i$n) %*% t(params$alpha))))
+                 1/(1+exp((cbind(1,i$n) %*% t(alpha))))
                }
                ) %>% as.numeric()
   
   Sig_xt <- with(params, Wo %*% SigTo %*% t(Wo) + diag(sig2E,p))
+  # Sig_xt_inv <- with(params, 1/sig2E*(diag(p) - 1/sig2E*Wo%*%MASS::ginv(MASS::ginv(SigTo)+1/sig2E*diag(rx))%*%t(Wo)))
   x_t <- with(params,
               (2*pi)^(-0.5*p) * det(Sig_xt)^(-0.5) *
-                exp(-0.5*(x-i$n[,1:r]%*%t(W))%*%solve(Sig_xt)%*%t((x-i$n[,1:r]%*%t(W))))
+                exp(-0.5*(x-i$n[,1:r]%*%t(W))%*%MASS::ginv(Sig_xt)%*%t((x-i$n[,1:r]%*%t(W))))
   ) %>% as.numeric()
+
+  # print(x)
+  # print(i$n[,1:r])
+  # print(i$n[,1:r]%*%t(params$W))
+  
+  # print(det(Sig_xt)^(-0.5))
+  # print(with(params,(x-i$n[,1:r]%*%t(W))))
+  # print(with(params,MASS::ginv(Sig_xt)))
+  # print(Sig_xt_inv)
   
   Sig_yu <- with(params, Co %*% SigUo %*% t(Co) + diag(sig2F,q))
   y_u <- with(params,
               (2*pi)^(-0.5*q) * det(Sig_yu)^(-0.5) *
-                exp(-0.5*(y-i$n[,r+1:r]%*%t(C))%*%solve(Sig_yu)%*%t((y-i$n[,r+1:r]%*%t(C))))
+                exp(-0.5*(y-i$n[,r+1:r]%*%t(C))%*%MASS::ginv(Sig_yu)%*%t((y-i$n[,r+1:r]%*%t(C))))
   ) %>% as.numeric()
+  
+  # print(c(z_tu, x_t, y_u, i$w))
+  
   return(z_tu*x_t*y_u*i$w)
 }

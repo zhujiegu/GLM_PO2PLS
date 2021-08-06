@@ -13,7 +13,7 @@ E_step_bi <- function(X, Y, Z, params){
   sig2E = params$sig2E
   sig2F = params$sig2F
   SigU = SigT%*%B^2 + SigH
-  a0 = a0
+  a0 = params$a0
   a = params$a
   b = params$b
   ## define dimensions
@@ -28,51 +28,45 @@ E_step_bi <- function(X, Y, Z, params){
   ## # E(tu|xyz) with numerical integration
   # N x r, collection of all the samples
   mu_TU <- lapply(1:N, function(e){
-    GH_Intl(fun_mu, dim=2*r, level=6, X[e,],Y[e,],Z[e], params)}) %>% 
+    GH_Intl(fun_mu, div_mrg = T, dim=2*r, level=6, X[e,],Y[e,],Z[e], params)}) %>% 
     unlist %>% matrix(nrow=2) %>% t
   
   # 2r x 2r, Average across N samples
   S_ttuu <- lapply(1:N, function(e){
-    GH_Intl(fun_S, dim=2*r, level=6, X[e,],Y[e,],Z[e], params)})
+    GH_Intl(fun_S, div_mrg = T, dim=2*r, level=6, X[e,],Y[e,],Z[e], params)})
   S_ttuu <- Reduce("+", S_ttuu)/N
   
+  Stt <- S_ttuu[1:r,1:r,drop=FALSE]
+  Suu <- S_ttuu[r+1:r,r+1:r,drop=FALSE]
+  Stu <- S_ttuu[1:r,r+1:r,drop=FALSE]
+  
+  Chh <- Suu - t(Stu)%*%B - t(B)%*%Stu + t(B)%*%Stt%*%B
+  
   # loglikelihood
-  lapply(1:N, function(e){
-    GH_Intl(fun_com, dim=2*r, level=6, X[e,],Y[e,],Z[e], params)})
+  loglik <- lapply(1:N, function(e){
+    GH_Intl(fun_1, div_mrg = F, dim=2*r, level=6, X[e,],Y[e,],Z[e], params)}) %>% unlist %>% log %>% sum
   
   list(
-    mu_T = mu_T,
-    mu_U = mu_U,
-    mu_To = mu_To,
-    mu_Uo = mu_Uo,
+    mu_T = mu_TU[,1:r,drop=F],
+    mu_U = mu_TU[,r+1:r,drop=F],
     Stt = Stt,
     Suu = Suu,
-    Stoto = Stoto,
-    Suouo = Suouo,
     Stu = Stu,
-    Stto = Stto,
-    Suuo = Suuo,
-    Suto = Suto,
-    See = Cee,
-    Sff = Cff,
-    Sgg = Cgg,
     Shh = Chh,
-    aa=aa,
-    bb=bb,
-    EE=EE,
-    ET=ET,
-    loglik = loglik
+    logl = loglik
   )
 }
 
 #' @export
-M_step_su <- function(E_fit, params, X, Y, Z, orth_type = c("SVD","QR")){
+M_step_bi <- function(E_fit, params, X, Y, Z, orth_type = c("SVD","QR")){
   orth_x = ssq(params$Wo) > 0
   orth_y = ssq(params$Co) > 0
   orth_type = match.arg(orth_type)
   with(E_fit,{
     
     N = nrow(X)
+    p = ncol(X)
+    q = ncol(Y)
     r = ncol(mu_T)
     rx = ncol(params$Wo)
     ry = ncol(params$Co)
@@ -80,58 +74,32 @@ M_step_su <- function(E_fit, params, X, Y, Z, orth_type = c("SVD","QR")){
     params$B = t(Stu) %*% MASS::ginv(Stt) * diag(1,r)
     params$SigT = Stt*diag(1,r)
     params$SigU = Suu*diag(1,r)
-    params$SigTo = Stoto*diag(1,rx)
-    params$SigUo = Suouo*diag(1,ry)
-    params$SigH = Shh*diag(1,r)#abs(Suu - 2*Sut%*%params_old$B + Stt%*%params_old$B^2)
+    params$SigH = Shh*diag(1,r)
     
-    params$sig2E = See
-    params$sig2F = Sff
-    params$sig2G = Sgg
-    # params$sig2G = 0
-    # params$sig2G = params$sig2G
+    params$W = orth(t(X/N) %*% mu_T %*% MASS::ginv(Stt),type = orth_type)
+    params$C = orth(t(Y/N) %*% mu_U %*% MASS::ginv(Suu),type = orth_type)#
     
-    params$W = orth(t(X/N) %*% mu_T - params$Wo%*%t(Stto),type = orth_type)#%*%MASS::ginv(Stt)
-    params$C = orth(t(Y/N) %*% mu_U - params$Co%*%t(Suuo),type = orth_type)#%*%MASS::ginv(Suu)
+    params$sig2E = 1/p *(sum(diag(X%*%t(X)))/N - 2*sum(diag(mu_T%*%t(params$W)%*%t(X)))/N +
+                           sum(diag(params$SigT)) - sum(diag(params$SigTo)))
+    params$sig2F = 1/q *(sum(diag(Y%*%t(Y)))/N - 2*sum(diag(mu_U%*%t(params$C)%*%t(Y)))/N +
+                           sum(diag(params$SigU)) - sum(diag(params$SigUo)))
     
-    params$Wo = suppressWarnings(orth_x*orth(t(X/N) %*% mu_To - params$W%*%Stto,type = orth_type))#%*%MASS::ginv(Stoto)
-    params$Co = suppressWarnings(orth_y*orth(t(Y/N) %*% mu_Uo - params$C%*%Suuo,type = orth_type))#%*%MASS::ginv(Suouo)
+    ## this only works for low dimension, use power iteration for high dimension
+    var_xo <- t(X)%*%X/N -  t(X)%*%mu_T%*%t(params$W)/N - t(t(X)%*%mu_T%*%t(params$W))/N +
+      params$W%*%Stt%*%t(params$W) - diag(params$sig2E, p)
+    var_yo <- t(Y)%*%Y/N -  t(Y)%*%mu_U%*%t(params$C)/N - t(t(Y)%*%mu_U%*%t(params$C))/N +
+      params$C%*%Suu%*%t(params$C) - diag(params$sig2F, q)
     
-    # params$a = (t(Z/N)%*%mu_T - params$b%*%Stu) %*% MASS::ginv(Stt*diag(1,r))
-    # params$b = (t(Z/N)%*%mu_U - params$a%*%t(Stu)) %*% MASS::ginv(Suu*diag(1,r))
+    # SVD
+    dcmp_varxo <- svd(var_xo, nu = min(N, rx), nv=0)
+    dcmp_varyo <- svd(var_yo, nu = min(N, ry), nv=0)
     
-    params$a=aa
-    params$b=bb
-    
-    # a + bB -> a
-    # params$a = (t(Z/N)%*%mu_T - params$b%*%(Stu-Stt%*%B)) %*% MASS::ginv(Stt*diag(1,r))
-    # params$b = (t(Z/N)%*%(mu_U-mu_T%*%B) - params$a%*%(Stu-Stt%*%B)) %*% MASS::ginv(Shh*diag(1,r))
-    
-    # A = (a,b)
-    # Sttuu <- rbind(cbind(Stt*diag(1,r), Stu),
-    #                cbind(t(Stu), Suu*diag(1,r)))
-    # aabb <- t(Z/N) %*% cbind(mu_T,mu_U) %*% MASS::ginv(Sttuu)
-    # params$a = aabb[,1:r, drop=FALSE]
-    # params$b = aabb[,r+1:r, drop=FALSE]
-    
-    # # Try correct order
-    # # browser()
-    # signB <- sign(diag(params$B))
-    # params$B <- params$B %*% diag(signB,r)
-    # params$C <- params$C %*% diag(signB,r)
-    # params$b <- params$b %*% diag(signB,r)
-    # ordSB <- order(diag(params$SigT %*% params$B), decreasing = TRUE)
-    # params$B <- params$B[,ordSB, drop=FALSE]
-    # params$W <- params$W[,ordSB, drop=FALSE]
-    # params$C <- params$C[,ordSB, drop=FALSE]
-    # params$a <- params$a[,ordSB, drop=FALSE]
-    # params$b <- params$b[,ordSB, drop=FALSE]
-    # params$SigT <- params$SigT[,ordSB, drop=FALSE]
-    # params$SigU <- params$SigU[,ordSB, drop=FALSE]
-    # params$SigH <- params$SigH[,ordSB, drop=FALSE]
-    
-    # params$a = matrix(rep(0, r), nrow = 1, ncol=r)
-    # params$b = matrix(rep(0, r), nrow = 1, ncol=r)
-    
+    # Orthogonal loadings are eigen vectors, variance matrices contain the eigen values
+    params$Wo = dcmp_varxo$u
+    params$SigTo = diag(x=dcmp_varxo$d[1:rx], nrow=rx)
+    params$Co = dcmp_varyo$u
+    params$SigUo = diag(x=dcmp_varyo$d[1:ry], nrow=ry)
+
     return(params)
   })
 }
@@ -158,7 +126,7 @@ Su_PO2PLS_bi <- function(X, Y, Z, r, rx, ry, steps = 1e5, tol = 1e-6, init_param
     init_param <- match.arg(init_param)
     if(r+max(rx,ry) <= min(ncol(X),ncol(Y)) && init_param == "o2m")
     {
-      params <- generate_params_su(X, Y, Z, r, rx, ry, type = "o2m")
+      params <- generate_params_bi(X, Y, Z, r, rx, ry, type = "o2m")
     }
     else
     {
@@ -167,7 +135,7 @@ Su_PO2PLS_bi <- function(X, Y, Z, r, rx, ry, steps = 1e5, tol = 1e-6, init_param
         cat("** NOTE: Too many components for init_param='o2m', switched to init_param='unit'**.\n\n");
         init_param = "unit"
       }
-      params <- generate_params_su(X, Y, Z, r, rx, ry, type = init_param)
+      params <- generate_params_bi(X, Y, Z, r, rx, ry, type = init_param)
     }
   }
   
@@ -225,10 +193,10 @@ Su_PO2PLS_bi <- function(X, Y, Z, r, rx, ry, steps = 1e5, tol = 1e-6, init_param
     params[-(1:4)] <- generate_params_su(X, Y, r, rx, ry, type = 'r')[-(1:4)]
   }
   # params <- params_max
-  signB <- sign(diag(params$B))
-  params$B <- params$B %*% diag(signB,r)
-  params$C <- params$C %*% diag(signB,r)
-  params$b <- params$b %*% diag(signB,r)
+  # signB <- sign(diag(params$B))
+  # params$B <- params$B %*% diag(signB,r)
+  # params$C <- params$C %*% diag(signB,r)
+  # params$b <- params$b %*% diag(signB,r)
   
   ## order of comps for r>1
   # ordSB <- order(diag(params$SigT), decreasing = TRUE)

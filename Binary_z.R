@@ -5,4 +5,4 @@ fun_h <- function(l){
   crossprod(l$n) * l$w
 }
 
-GH_Intl(fun_h, dim=2*r, level=20, mu=rep(0,2*r), sigma=sigma, params = 3, plot_nodes=T)
+GH_Intl(fun_mu, dim=2*r, level=20, mu=rep(0,2*r), sigma=sigma, params = 3, plot_nodes=T)

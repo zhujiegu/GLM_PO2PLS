@@ -12,7 +12,7 @@ blockm<-function(A,B,C)
 
 #' @export
 generate_params_su <- function(X, Y, Z, r, rx, ry, alpha_x = 0.1, alpha_y = 0.1, alpha_z = 0.1,
-                               alpha_tu = 0.1, B, a,b, type=c('o2m','random')){
+                               alpha_tu = 0.1, B=1, a=t(2),b=t(1), type=c('o2m','random')){
   type=match.arg(type)
   p = ifelse(is.matrix(X) | type != "random", ncol(X), X)
   q = ifelse(is.matrix(Y) | type != "random", ncol(Y), Y)
