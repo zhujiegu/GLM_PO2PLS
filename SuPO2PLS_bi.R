@@ -1,5 +1,5 @@
 #' @export
-E_step_bi <- function(X, Y, Z, params){
+E_step_bi <- function(X, Y, Z, params, level = level, Nr.core=1){
   ## retrieve parameters
   W = params$W
   C = params$C
@@ -24,16 +24,30 @@ E_step_bi <- function(X, Y, Z, params){
   rx = ncol(Wo)
   ry = ncol(Co)
   
-
-  ## # E(tu|xyz) with numerical integration
-  # N x r, collection of all the samples
-  mu_TU <- lapply(1:N, function(e){
-    GH_Intl(fun_mu, div_mrg = T, dim=2*r, level=6, X[e,],Y[e,],Z[e], params)}) %>% 
-    unlist %>% matrix(nrow=2) %>% t
+  # Numerical integration of the common part and store the results (all sample combined)
+  common <- GH_com(Nr.cores=4, level=level, X,Y,Z, params, plot_nodes=F)
+  list_com <- common$list_com # values of common parts (list(length N) of list (dim^Q))
+  list_nodes <- common$nodes
   
+  # likelihood of each sample
+  list_lik <- lapply(list_com, function(e) sum(unlist(e)))
+  
+  ## # E(tu|xyz) with numerical integration
+  # different part in integrant
+  int_diff <- list_nodes
+  # combine common parts
+  mu_TU <- lapply(1:N, function(e) Reduce("+", Map("*", int_diff, list_com[[e]])))
+  # divide by the marginal likelihood of each sample
+  mu_TU <- Map("/", mu_TU, list_lik)
+  mu_TU <- mu_TU %>% unlist %>% matrix(nrow=2) %>% t
+  
+  # different part in integrant
+  int_diff <- lapply(list_nodes, crossprod)
+  # combine common parts
+  S_ttuu <- lapply(1:N, function(e) Reduce("+", Map("*", int_diff, list_com[[e]])))
+  # divide by the marginal likelihood of each sample
+  S_ttuu <- Map("/", S_ttuu, list_lik)
   # 2r x 2r, Average across N samples
-  S_ttuu <- lapply(1:N, function(e){
-    GH_Intl(fun_S, div_mrg = T, dim=2*r, level=6, X[e,],Y[e,],Z[e], params)})
   S_ttuu <- Reduce("+", S_ttuu)/N
   
   Stt <- S_ttuu[1:r,1:r,drop=FALSE]
@@ -42,9 +56,8 @@ E_step_bi <- function(X, Y, Z, params){
   
   Chh <- Suu - t(Stu)%*%B - t(B)%*%Stu + t(B)%*%Stt%*%B
   
-  # loglikelihood
-  loglik <- lapply(1:N, function(e){
-    GH_Intl(fun_1, div_mrg = F, dim=2*r, level=6, X[e,],Y[e,],Z[e], params)}) %>% unlist %>% log %>% sum
+  # log likelihood
+  logl <- list_lik %>% unlist %>% log %>% sum
   
   list(
     mu_T = mu_TU[,1:r,drop=F],
@@ -53,7 +66,7 @@ E_step_bi <- function(X, Y, Z, params){
     Suu = Suu,
     Stu = Stu,
     Shh = Chh,
-    logl = loglik
+    logl = logl
   )
 }
 
@@ -112,7 +125,7 @@ jitter_params <- function(params, amount = NULL){
 
 
 #' @export
-Su_PO2PLS_bi <- function(X, Y, Z, r, rx, ry, steps = 1e5, tol = 1e-6, init_param= c('random','o2m'),
+Su_PO2PLS_bi <- function(X, Y, Z, r, rx, ry, steps = 1e5, tol = 1e-6, level=level, Nr.core =1, init_param= c('random','o2m'),
                       orth_type = "SVD", random_restart = FALSE){
   # if(all(c("W","Wo","C","Co","B","SigT","SigTo","SigUo","SigH","sig2E","sig2F") %in% names(init_param))) {cat('using old fit \n'); params <- init_param}
   # else {params <- generate_params(X, Y, Z, r, rx, ry, type = init_param)}
@@ -155,7 +168,7 @@ Su_PO2PLS_bi <- function(X, Y, Z, r, rx, ry, steps = 1e5, tol = 1e-6, init_param
     }
     params_max <- params
     for(i in 1:steps){
-      E_next = E_step_bi(X, Y, Z, params)
+      E_next = E_step_bi(X, Y, Z, params, level=level, Nr.core=Nr.core)
       params_next = M_step_bi(E_next, params, X, Y, Z, orth_type = orth_type)
       params_next$B <- abs(params_next$B)
       

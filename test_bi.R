@@ -33,17 +33,37 @@ params <- params_true
 # GH_Intl(fun_S, dim=2*r, level=6, X[2,],Y[2,],Z[2], params)
 # GH_Intl(fun_1, dim=2*r, level=6, X[2,],Y[2,],Z[2], params)
 
-# E_step_bi(X,Y,Z,params) %>% str
-
+###############################################
+# test numerical estimation of the log likelihood
+# ! Manually modify the output of the fun_com function (exclude z to match PO2PLS)
+true_l <- PO2PLS::E_step(X,Y,params)$logl
+test_l <- c()
+levels <- c(2:20,25,30,50)
+for(l in levels){
+  test_l <- append(test_l, GH_com(Nr.cores=4, level=l, X,Y,Z, params, plot_nodes=T) %>% 
+                     lapply(unlist) %>% lapply(sum) %>% unlist %>% log %>% sum)
+}
+plot(x=levels, y = test_l)
+abline(h = true_l, col = 'red')
+###############################################
 
 # fit supervised PO2PLS
-fit <- Su_PO2PLS_bi(X, Y, Z, r, rx, ry, steps = 20, init_param = "random")
-fit_compare <- Su_PO2PLS(X, Y, Z, r, rx, ry, steps = 20, init_param = "random")
+fit <- Su_PO2PLS_bi(X, Y, Z, r, rx, ry, steps = 20, level=11, Nr.core =4,init_param = "random")
+fit_o2 <- PO2PLS::PO2PLS(X, Y, r, rx, ry, steps = 200, init_param = "random")
+
+fit_su <- Su_PO2PLS(X, Y, Z, r, rx, ry, steps = 200, init_param = "random")
 
 crossprod(fit$params$W, params$W)
 crossprod(fit$params$Wo, params$Wo)
 
 #############################################
+
+# test E step
+E_step_bi(X, Y, Z, params, level = 11) %>% str
+
+
+
+
 # irrelevant XYZ, posterier mean and variance of tu should be close to the prior
 # generate data
 X <- matrix(rnorm(p*N), N,p)/p
@@ -53,6 +73,8 @@ Z <- rbinom(N,1,0.5)
 lapply(1:N, function(e){
   GH_Intl(fun_mu, div_mrg = T, dim=2*r, level=6, X[e,],Y[e,],Z[e], params)}) %>% 
   unlist %>% matrix(nrow=2) %>% t
+
+
 
 
 GH_Intl(fun_1, div_mrg = F, dim=2*r, level=6, X[1,],Y[1,],Z[1], params)

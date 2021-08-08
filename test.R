@@ -4,7 +4,7 @@ library(magrittr)
 
 #######
 # set up
-N=30;p=10;q=10
+N=30;p=2;q=10
 r=3
 rx=1
 ry=1

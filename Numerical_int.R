@@ -1,3 +1,46 @@
+GH_com <- function(Nr.cores=1, level=6, X,Y,Z, params, plot_nodes=F){
+  dim = 2*ncol(params$B)
+  N = nrow(X)
+  # standard GH rule
+  rule <- fastGHQuad::gaussHermiteData(level)
+  
+  # expand grid
+  nodes <- as.matrix(expand.grid(lapply(apply(replicate(dim, rule$x), 
+                                              2, list), unlist)))
+  g <- as.matrix(expand.grid(lapply(apply(replicate(dim, rule$w), 
+                                          2, list), unlist)))
+  w <- apply(g, 1, prod)
+  
+  # adjust for mu and sigma
+  mu <- rep(0,dim)
+  sigma <- with(params, rbind(cbind(SigT, SigT%*%B),
+                              cbind(B%*%SigT, SigT%*%B^2 + SigH)))
+  nodes <- mu + t(sqrt(2)*t(chol(sigma))%*%t(nodes))
+  w <- (1/sqrt(pi))^dim * w
+  
+  # visulize the nodes
+  if(plot_nodes){
+    plot(nodes, cex=-5/log(w), pch=19,
+         xlab=expression(x[1]),
+         ylab=expression(x[2]))
+  }
+  
+  # make list
+  n_w <- lapply(seq_len(nrow(nodes)), function(i) list(n = nodes[i, ,drop=F], w = w[i]))
+  
+  list_com <- mclapply(1:N, mc.cores = Nr.cores, function(e){
+    lapply(n_w, fun_com, x=X[e,],y=Y[e,],z=Z[e], params=params)
+  })
+  
+  # lapply(n_w, fun_com, x=x[e,],y=y[e,],z=z[e], params=params)
+
+  nodes <- lapply(seq_len(nrow(nodes)), function(i) nodes[i, ,drop=F])
+  return(list(list_com=list_com, nodes=nodes))
+}
+
+
+
+
 # func is the g(eta) in form int(g(eta)f(z|eta)f(x,y|eta)f(eta)d(eta))
 # set div_mrg to TRUE when divided by f(x,y,z)
 GH_Intl <- function(func, div_mrg=F, dim=2*r, level=6, x,y,z, params, plot_nodes=F){
@@ -58,24 +101,6 @@ GH_Intl <- function(func, div_mrg=F, dim=2*r, level=6, x,y,z, params, plot_nodes
   return(result)
 }
 
-# # checking integral with covariance matrix
-# fun_h <- function(i, x,y,z,params){
-#   crossprod(i$n) * i$w
-# }
-
-# E(tu|xyz) without common part
-fun_mu <- function(i, x,y,z,params){
-  return(i$n)
-}
-
-# E(Sttuu|xyz) without common part
-fun_S <- function(i, x,y,z,params){
-  return(crossprod(i$n))
-}
-
-fun_1 <- function(i, x,y,z,params){
-  return(1)
-}
 
 #################
 # common part of every integral
@@ -96,15 +121,6 @@ fun_com <- function(i, x,y,z,params){
               (2*pi)^(-0.5*p) * det(Sig_xt)^(-0.5) *
                 exp(-0.5*(x-i$n[,1:r]%*%t(W))%*%MASS::ginv(Sig_xt)%*%t((x-i$n[,1:r]%*%t(W))))
   ) %>% as.numeric()
-
-  # print(x)
-  # print(i$n[,1:r])
-  # print(i$n[,1:r]%*%t(params$W))
-  
-  # print(det(Sig_xt)^(-0.5))
-  # print(with(params,(x-i$n[,1:r]%*%t(W))))
-  # print(with(params,MASS::ginv(Sig_xt)))
-  # print(Sig_xt_inv)
   
   Sig_yu <- with(params, Co %*% SigUo %*% t(Co) + diag(sig2F,q))
   y_u <- with(params,
@@ -114,5 +130,8 @@ fun_com <- function(i, x,y,z,params){
   
   # print(c(z_tu, x_t, y_u, i$w))
   
+  ## test likelihood without z
+  # return(x_t*y_u*i$w)
+
   return(z_tu*x_t*y_u*i$w)
 }
