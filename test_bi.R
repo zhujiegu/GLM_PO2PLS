@@ -7,7 +7,7 @@ library(magrittr)
 
 #######
 # set up
-N=30;p=10;q=10
+N=200;p=10;q=10
 r=1
 rx=1
 ry=1
@@ -48,42 +48,21 @@ abline(h = true_l, col = 'red')
 ###############################################
 
 # fit supervised PO2PLS
-fit <- Su_PO2PLS_bi(X, Y, Z, r, rx, ry, steps = 20, level=11, Nr.core =4,init_param = "random")
+fit <- Su_PO2PLS_bi(X, Y, Z, r, rx, ry, steps = 50, level=6, Nr.core =4,init_param = 'random')
+fit2 <- Su_PO2PLS_bi(X, Y, Z, r, rx, ry, steps = 10, level=20, Nr.core =3,init_param = params)
+
 fit_o2 <- PO2PLS::PO2PLS(X, Y, r, rx, ry, steps = 200, init_param = "random")
 
 fit_su <- Su_PO2PLS(X, Y, Z, r, rx, ry, steps = 200, init_param = "random")
 
 crossprod(fit$params$W, params$W)
 crossprod(fit$params$Wo, params$Wo)
+crossprod(fit$params$C, params$C)
+crossprod(fit$params$Co, params$Co)
+
+
+fit$params %>% str
+fit$logl %>% plot
+fit$logl %>% plot(ylim=c(-170,-140))
 
 #############################################
-
-# test E step
-E_step_bi(X, Y, Z, params, level = 11) %>% str
-
-
-
-
-# irrelevant XYZ, posterier mean and variance of tu should be close to the prior
-# generate data
-X <- matrix(rnorm(p*N), N,p)/p
-Y <- matrix(rnorm(q*N), N,q)/q
-Z <- rbinom(N,1,0.5)
-
-lapply(1:N, function(e){
-  GH_Intl(fun_mu, div_mrg = T, dim=2*r, level=6, X[e,],Y[e,],Z[e], params)}) %>% 
-  unlist %>% matrix(nrow=2) %>% t
-
-
-
-
-GH_Intl(fun_1, div_mrg = F, dim=2*r, level=6, X[1,],Y[1,],Z[1], params)
-
-
-GH_Intl(fun_S, div_mrg = T, dim=2*r, level=6, X[2,],Y[2,],Z[2], params, plot_nodes = T)
-GH_Intl(fun_S, div_mrg = T, dim=2*r, level=6, X[7,],Y[7,],Z[7], params)
-
-
-S_ttuu <- lapply(1:N, function(e){
-  GH_Intl(fun_S, div_mrg = T, dim=2*r, level=5, X[e,],Y[e,],Z[e], params)})
-Reduce("+", S_ttuu)/N

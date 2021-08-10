@@ -116,7 +116,9 @@ fun_com <- function(i, x,y,z,params){
                ) %>% as.numeric()
   
   Sig_xt <- with(params, Wo %*% SigTo %*% t(Wo) + diag(sig2E,p))
+  # rx <- ncol(params$Wo)
   # Sig_xt_inv <- with(params, 1/sig2E*(diag(p) - 1/sig2E*Wo%*%MASS::ginv(MASS::ginv(SigTo)+1/sig2E*diag(rx))%*%t(Wo)))
+  # Sig_xt_det <- with(params, det(diag(rx)+1/sig2E*SigTo)*(sig2E^p))
   x_t <- with(params,
               (2*pi)^(-0.5*p) * det(Sig_xt)^(-0.5) *
                 exp(-0.5*(x-i$n[,1:r]%*%t(W))%*%MASS::ginv(Sig_xt)%*%t((x-i$n[,1:r]%*%t(W))))
@@ -129,9 +131,7 @@ fun_com <- function(i, x,y,z,params){
   ) %>% as.numeric()
   
   # print(c(z_tu, x_t, y_u, i$w))
-  
   ## test likelihood without z
   # return(x_t*y_u*i$w)
-
   return(z_tu*x_t*y_u*i$w)
 }
