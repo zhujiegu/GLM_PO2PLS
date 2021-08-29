@@ -26,7 +26,7 @@ E_step_bi <- function(X, Y, Z, params, level = level, Nr.core=1){
   
   #################################################
   ## Numerical integration of the common part and store the results (all sample combined)
-  common <- GH_com(Nr.cores=4, level=level, X,Y,Z, params, plot_nodes=F)
+  common <- GH_com(Nr.cores=Nr.core, level=level, X,Y,Z, params, plot_nodes=F)
   list_com <- common$list_com # values of common parts (list(length N) of list (dim^Q))
   list_nodes <- common$nodes
   #################################################
@@ -49,14 +49,13 @@ E_step_bi <- function(X, Y, Z, params, level = level, Nr.core=1){
   S_ttuu <- lapply(1:N, function(e) Reduce("+", Map("*", int_diff, list_com[[e]])))
   # divide by the marginal likelihood of each sample
   S_ttuu <- Map("/", S_ttuu, list_lik)
-  # 2r x 2r, Average across N samples
-  S_ttuu <- Reduce("+", S_ttuu)/N
+  # # 2r x 2r, Average across N samples
+  # S_ttuu <- Reduce("+", S_ttuu)/N
   
-  Stt <- S_ttuu[1:r,1:r,drop=FALSE]
-  Suu <- S_ttuu[r+1:r,r+1:r,drop=FALSE]
-  Stu <- S_ttuu[1:r,r+1:r,drop=FALSE]
-  
-  Chh <- Suu - t(Stu)%*%B - t(B)%*%Stu + t(B)%*%Stt%*%B
+  # Stt <- S_ttuu[1:r,1:r,drop=FALSE]
+  # Suu <- S_ttuu[r+1:r,r+1:r,drop=FALSE]
+  # Stu <- S_ttuu[1:r,r+1:r,drop=FALSE]
+  # Chh <- Suu - t(Stu)%*%B - t(B)%*%Stu + t(B)%*%Stt%*%B
   #################################################
   # adjust (t,u) to (t,h)
   list_nodes_th <- lapply(list_nodes, function(e) {
@@ -81,14 +80,16 @@ E_step_bi <- function(X, Y, Z, params, level = level, Nr.core=1){
   #################################################
   ## log likelihood
   logl <- list_lik %>% unlist %>% log %>% sum
+  # print(list_lik %>% unlist %>% log)
   #################################################
   list(
     mu_T = mu_TU[,1:r,drop=F],
     mu_U = mu_TU[,r+1:r,drop=F],
-    Stt = Stt,
-    Suu = Suu,
-    Stu = Stu,
-    Shh = Chh,
+    S_ttuu = S_ttuu,
+    # Stt = Stt,
+    # Suu = Suu,
+    # Stu = Stu,
+    # Shh = Chh,
     s = s,
     grd_ab = grd_ab,
     logl = logl
@@ -160,6 +161,56 @@ M_step_bi <- function(E_fit, params, X, Y, Z, orth_type = c("SVD","QR")){
     rx = ncol(params$Wo)
     ry = ncol(params$Co)
     
+    # 2r x 2r, Average across N samples
+    S_ttuu_avgN <- Reduce("+", S_ttuu)/N
+    Stt <- S_ttuu_avgN[1:r,1:r,drop=FALSE]
+    Suu <- S_ttuu_avgN[r+1:r,r+1:r,drop=FALSE]
+    Stu <- S_ttuu_avgN[1:r,r+1:r,drop=FALSE]
+    Shh <- Suu - t(Stu)%*%B - t(B)%*%Stu + t(B)%*%Stt%*%B
+    
+    # filter out samples with negative sig2E or sig2F
+    # Stt, Suu different for each sample
+    tmp_sig2E = sapply(1:N, function(e){
+      1/p * (sum(diag(X[e,,drop=F]%*%t(X[e,,drop=F]))) - 2*sum(diag(mu_T[e,,drop=F]%*%t(params$W)%*%t(X[e,,drop=F]))) +
+               sum(diag(S_ttuu[[e]][1:r,1:r,drop=FALSE])) - sum(diag(params$SigTo)))
+    })
+    tmp_sig2F = sapply(1:N, function(e){
+      1/q * (sum(diag(Y[e,,drop=F]%*%t(Y[e,,drop=F]))) - 2*sum(diag(mu_U[e,,drop=F]%*%t(params$C)%*%t(Y[e,,drop=F]))) +
+               sum(diag(S_ttuu[[e]][r+1:r,r+1:r,drop=FALSE])) - sum(diag(params$SigUo)))
+    })
+    
+    # # First average Stt, Suu, same for all samples
+    # tmp_sig2E = sapply(1:N, function(e){
+    #   1/p * (sum(diag(X[e,,drop=F]%*%t(X[e,,drop=F]))) - 2*sum(diag(mu_T[e,,drop=F]%*%t(params$W)%*%t(X[e,,drop=F]))) +
+    #            sum(diag(Stt)) - sum(diag(params$SigTo)))
+    # })
+    # tmp_sig2F = sapply(1:N, function(e){
+    #   1/q * (sum(diag(Y[e,,drop=F]%*%t(Y[e,,drop=F]))) - 2*sum(diag(mu_U[e,,drop=F]%*%t(params$C)%*%t(Y[e,,drop=F]))) +
+    #            sum(diag(Suu)) - sum(diag(params$SigUo)))
+    # })
+    
+    # which samples have positive sig2E or sig2F
+    idx_posE <- which(tmp_sig2E>0)
+    idx_posF <- which(tmp_sig2F>0)
+    if(length(idx_posE)==0 | length(idx_posF)==0){
+      stop("all samples have negative sig2E or sig2F")
+    }
+    
+    nr_negE <- N - length(idx_posE)
+    nr_negF <- N - length(idx_posF)
+    
+    print(nr_negE); print(nr_negF)
+    print(tmp_sig2E)
+    print(tmp_sig2F)
+    # print(mean(tmp_sig2E))
+    # print(mean(tmp_sig2F))
+    
+    # tmp_sig2E[tmp_sig2E<0] <- 0
+    # tmp_sig2F[tmp_sig2F<0] <- 0
+    
+    params$sig2E = mean(tmp_sig2E)
+    params$sig2F = mean(tmp_sig2F)
+    
     params$B = t(Stu) %*% MASS::ginv(Stt) * diag(1,r)
     params$SigT = Stt*diag(1,r)
     params$SigU = Suu*diag(1,r)
@@ -171,32 +222,86 @@ M_step_bi <- function(E_fit, params, X, Y, Z, orth_type = c("SVD","QR")){
     params$W = orth(t(X/N) %*% mu_T %*% MASS::ginv(Stt),type = orth_type)
     params$C = orth(t(Y/N) %*% mu_U %*% MASS::ginv(Suu),type = orth_type)#
     
-    params$sig2E = 1/p *(sum(diag(X%*%t(X)))/N - 2*sum(diag(mu_T%*%t(params$W)%*%t(X)))/N +
-                           sum(diag(params$SigT)) - sum(diag(params$SigTo)))
-    params$sig2F = 1/q *(sum(diag(Y%*%t(Y)))/N - 2*sum(diag(mu_U%*%t(params$C)%*%t(Y)))/N +
-                           sum(diag(params$SigU)) - sum(diag(params$SigUo)))
+    # params$sig2E = 1/p * abs(sum(diag(X%*%t(X)))/N - 2*sum(diag(mu_T%*%t(params$W)%*%t(X)))/N +
+    #                        sum(diag(params$SigT)) - sum(diag(params$SigTo)))
+    # params$sig2F = 1/q * abs(sum(diag(Y%*%t(Y)))/N - 2*sum(diag(mu_U%*%t(params$C)%*%t(Y)))/N +
+    #                        sum(diag(params$SigU)) - sum(diag(params$SigUo)))
     
-    if(params$sig2E < 0) params$sig2E = 1e-10
-    if(params$sig2F < 0) params$sig2F = 1e-10
+    # SVD for high dimensional
+    dcmp_varxo <- svd_orthpart(X, params$W, params$sig2E, mu_T, Stt, rx)
+    dcmp_varyo <- svd_orthpart(Y, params$C, params$sig2F, mu_U, Suu, ry)
+
+    params$Wo = dcmp_varxo$V
+    params$SigTo = diag(x=dcmp_varxo$D, nrow=rx)
+    params$Co = dcmp_varyo$V
+    params$SigUo = diag(x=dcmp_varyo$D, nrow=ry)
+
+    # ## this only works for low dimension, use power iteration for high dimension
+    # var_xo <- t(X)%*%X/N -  t(X)%*%mu_T%*%t(params$W)/N - t(t(X)%*%mu_T%*%t(params$W))/N +
+    #   params$W%*%Stt%*%t(params$W) - diag(params$sig2E, p)
+    # var_yo <- t(Y)%*%Y/N -  t(Y)%*%mu_U%*%t(params$C)/N - t(t(Y)%*%mu_U%*%t(params$C))/N +
+    #   params$C%*%Suu%*%t(params$C) - diag(params$sig2F, q)
+    # 
+    # dcmp_varxo <- svd(var_xo, nu = min(N, rx), nv=0)
+    # dcmp_varyo <- svd(var_yo, nu = min(N, ry), nv=0)
+    # params$Wo = dcmp_varxo$u
+    # params$SigTo = diag(x=dcmp_varxo$d[1:rx], nrow=rx)
+    # params$Co = dcmp_varyo$u
+    # params$SigUo = diag(x=dcmp_varyo$d[1:ry], nrow=ry)
     
-    ## this only works for low dimension, use power iteration for high dimension
-    var_xo <- t(X)%*%X/N -  t(X)%*%mu_T%*%t(params$W)/N - t(t(X)%*%mu_T%*%t(params$W))/N +
-      params$W%*%Stt%*%t(params$W) - diag(params$sig2E, p)
-    var_yo <- t(Y)%*%Y/N -  t(Y)%*%mu_U%*%t(params$C)/N - t(t(Y)%*%mu_U%*%t(params$C))/N +
-      params$C%*%Suu%*%t(params$C) - diag(params$sig2F, q)
-    
-    # SVD
-    dcmp_varxo <- svd(var_xo, nu = min(N, rx), nv=0)
-    dcmp_varyo <- svd(var_yo, nu = min(N, ry), nv=0)
+    print(str(params))
+
     
     # Orthogonal loadings are eigen vectors, variance matrices contain the eigen values
-    params$Wo = dcmp_varxo$u
-    params$SigTo = diag(x=dcmp_varxo$d[1:rx], nrow=rx)
-    params$Co = dcmp_varyo$u
-    params$SigUo = diag(x=dcmp_varyo$d[1:ry], nrow=ry)
+
     return(params)
   })
 }
+
+svd_orthpart <- function(dat, ld, sig, mu, S, rs, tol=1e-10, max_powerit = 10000){
+  N <- nrow(dat)
+  p <- ncol(dat)
+  V <- matrix(NA, nrow = p, ncol = rs)
+  D <- c()
+  for(comp in 1:rs){
+    if(comp == 1){
+      # initialize
+      v_old <- matrix(rep(1,p),ncol = 1)
+      for(i in 1:max_powerit){
+        v <- t(dat)%*%(dat%*%v_old)/N - t(dat)%*%mu%*%(t(ld)%*%v_old)/N -
+                    ld%*%t(mu)%*%(dat%*%v_old)/N + ld%*%S%*%(t(ld)%*%v_old) - sig*v_old
+        d <- norm_vec(v)
+        v <- v/d
+        if (mse(v_old, v) < tol){
+          break
+        }
+        v_old <- v
+      }
+      V[,comp] <- v
+      D[comp] <- d
+    }
+    # for high dimension, avoid subtracting pxp matrix 
+    if(comp > 1){
+      # initialize
+      v_old <- matrix(rep(1,p),ncol = 1)
+      for(i in 1:max_powerit){
+        v <- t(dat)%*%(dat%*%v_old)/N - t(dat)%*%mu%*%(t(ld)%*%v_old)/N -
+                    ld%*%t(mu)%*%(dat%*%v_old)/N + ld%*%S%*%(t(ld)%*%v_old) - sig*v_old -
+                    V[,1:comp-1]%*%diag(D, nrow = comp-1)%*%(t(V[,1:comp-1])%*%v_old)
+        d <- norm_vec(v)
+        v <- v/d
+        if (mse(v_old, v) < tol){
+          break
+        }
+        v_old <- v
+      }
+      V[,comp] <- v
+      D[comp] <- d
+    }
+  }
+  return(list(V = V, D = D))
+}
+
 
 #' @export
 jitter_params <- function(params, amount = NULL){
@@ -262,6 +367,7 @@ Su_PO2PLS_bi <- function(X, Y, Z, r, rx, ry, steps = 1e5, tol = 1e-6, level=leve
       # #debug
       # if(is.na(logl[i+1])) browser()
       # # if(logl[i+1] < logl[i]) browser()
+      # if(logl[i+1] >1000) browser()
       
       if(i > 1 && abs(logl[i+1]-logl[i]) < tol) break
       if(i %in% c(1, 1e1, 1e2, 1e3, 5e3, 1e4, 4e4)) {

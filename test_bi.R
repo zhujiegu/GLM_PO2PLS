@@ -4,10 +4,11 @@ source('dat_generator.R')
 source('Numerical_int.R')
 library(OmicsPLS)
 library(magrittr)
+library(parallel)
 
 #######
 # set up
-N=200;p=10;q=10
+N=50;p=10;q=10
 r=1
 rx=1
 ry=1
@@ -27,12 +28,13 @@ X <- dat[,1:p]
 Y <- dat[,(p+1):(p+q)]
 Z <- dat[,ncol(dat)]
 
-params <- params_true  
+params <- params_true
 
 # GH_Intl(fun_mu, dim=2*r, level=6, X[1,],Y[1,],Z[1], params)
 # GH_Intl(fun_S, dim=2*r, level=6, X[2,],Y[2,],Z[2], params)
 # GH_Intl(fun_1, dim=2*r, level=6, X[2,],Y[2,],Z[2], params)
-
+GH_com(Nr.cores=1, level=6, X,Y,Z, params, plot_nodes=T)%>% 
+  lapply(unlist) %>% lapply(sum) %>% unlist %>% log %>% sum
 ###############################################
 # test numerical estimation of the log likelihood
 # ! Manually modify the output of the fun_com function (exclude z to match PO2PLS)
@@ -48,19 +50,21 @@ abline(h = true_l, col = 'red')
 ###############################################
 
 # fit supervised PO2PLS
-fit <- Su_PO2PLS_bi(X, Y, Z, r, rx, ry, steps = 50, level=6, Nr.core =4,init_param = 'random')
-fit2 <- Su_PO2PLS_bi(X, Y, Z, r, rx, ry, steps = 10, level=20, Nr.core =3,init_param = params)
+fit <- Su_PO2PLS_bi(X, Y, Z, r, 1, 1, steps = 20, level=6, Nr.core =1,init_param = 'random')
+fit2 <- Su_PO2PLS_bi(X, Y, Z, r, rx, ry, steps = 10, level=30, Nr.core =3,init_param = params)
+fit2 <- Su_PO2PLS_bi(X, Y, Z, r, rx, ry, steps = 10, level=30, Nr.core =3,init_param = 'random')
 
 fit_o2 <- PO2PLS::PO2PLS(X, Y, r, rx, ry, steps = 200, init_param = "random")
 
 fit_su <- Su_PO2PLS(X, Y, Z, r, rx, ry, steps = 200, init_param = "random")
 
-crossprod(fit$params$W, params$W)
-crossprod(fit$params$Wo, params$Wo)
-crossprod(fit$params$C, params$C)
-crossprod(fit$params$Co, params$Co)
+crossprod(fit2$params$W, params$W)
+crossprod(fit2$params$Wo, params$Wo)
+crossprod(fit2$params$C, params$C)
+crossprod(fit2$params$Co, params$Co)
 
 
+params %>% str
 fit$params %>% str
 fit$logl %>% plot
 fit$logl %>% plot(ylim=c(-170,-140))

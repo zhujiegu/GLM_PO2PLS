@@ -1,9 +1,9 @@
 {
-    "path" : "~/Mygit/Supervised_PO2PLS",
-    "sortOrder" : [
+    "path": "~/Mygit/Supervised_PO2PLS",
+    "sortOrder": [
         {
-            "ascending" : true,
-            "columnIndex" : 2
+            "columnIndex": 2,
+            "ascending": true
         }
     ]
 }

@@ -12,7 +12,7 @@ blockm<-function(A,B,C)
 
 #' @export
 generate_params_su <- function(X, Y, Z, r, rx, ry, alpha_x = 0.1, alpha_y = 0.1, alpha_z = 0.1,
-                               alpha_tu = 0.1, B=1, a=t(2),b=t(1), type=c('o2m','random')){
+                               alpha_tu = 0.1, B=1, a=t(2),b=t(1), type=c('o2m','random','specify')){
   type=match.arg(type)
   p = ifelse(is.matrix(X) | type != "random", ncol(X), X)
   q = ifelse(is.matrix(Y) | type != "random", ncol(Y), Y)
@@ -63,6 +63,29 @@ generate_params_su <- function(X, Y, Z, r, rx, ry, alpha_x = 0.1, alpha_y = 0.1,
         sig2G = as.numeric(alpha_z/(1-alpha_z)*(a %*% SigT %*% t(a) + b %*% SigU %*% t(b))))
     }))
   }
+  if(type=="specify"){
+    outp <- list(
+      W = orth(matrix(rnorm(p*r), p, r)+1),
+      Wo = suppressWarnings(sign(rx)*orth(matrix(rnorm(p*max(1,rx)), p, max(1,rx))+seq(-p/2,p/2,length.out = p))),
+      C = orth(matrix(rnorm(q*r), q, r)+1),
+      Co = suppressWarnings(sign(ry)*orth(matrix(rnorm(q*max(1,rx)), q, max(1,ry))+seq(-q/2,q/2,length.out = q))),
+      B = diag(B, r),
+      # B = diag(sort(runif(r,1,1),decreasing = TRUE),r), # set to 1 for simulation
+      SigT = diag(3,r),
+      SigTo = sign(rx)*diag(3,max(1,rx)),
+      SigUo = sign(ry)*diag(3,max(1,ry)),
+      a = a,
+      b = b
+    )
+    outp$SigH = diag(alpha_tu/(1-alpha_tu)*(diag(outp$SigT%*%outp$B^2)), r) #cov(H_UT)*diag(1,r),
+    outp$SigU <- with(outp, SigT %*% B^2 + SigH)
+    return(with(outp, {
+      c(outp,
+        sig2E = alpha_x/(1-alpha_x)*(mean(diag(SigT)) + mean(diag(SigTo)))/p,
+        sig2F = alpha_y/(1-alpha_y)*(mean(diag(SigT%*%B^2 + SigH)) + mean(diag(SigUo)))/q,
+        sig2G = as.numeric(alpha_z/(1-alpha_z)*(a %*% SigT %*% t(a) + b %*% SigU %*% t(b))))
+    }))
+  }
 }
 
 #' @export
@@ -91,7 +114,7 @@ generate_data_su <- function(N, params, distr = rnorm){
   ry = ncol(Co)
   Gamma = rbind(cbind(W, matrix(0,p,r), Wo, matrix(0,p,ry)),
                 cbind(matrix(0,q,r), C, matrix(0,q,rx), Co),
-                cbind(a, b, matrix(0,1,rx+ry)))
+                cbind(a-b%*%B, b, matrix(0,1,rx+ry)))
   VarM = blockm(
     blockm(
       blockm(SigT, SigT%*%B, SigU),
@@ -446,12 +469,12 @@ jitter_params <- function(params, amount = NULL){
 
 #' @export
 Su_PO2PLS <- function(X, Y, Z, r, rx, ry, steps = 1e5, tol = 1e-6, init_param= c('random','o2m'),
-                   orth_type = "SVD", random_restart = FALSE, b_on_h=F){
+                   orth_type = "SVD", random_restart = FALSE, b_on_h=T){
   # if(all(c("W","Wo","C","Co","B","SigT","SigTo","SigUo","SigH","sig2E","sig2F") %in% names(init_param))) {cat('using old fit \n'); params <- init_param}
   # else {params <- generate_params(X, Y, Z, r, rx, ry, type = init_param)}
   
   # debug_list <- list()
-  z_inf <- c()
+  # z_inf <- c()
   if(all(c("W","Wo","C","Co","B","SigT","SigTo","SigUo","SigH","sig2E","sig2F","a","b","sig2G") %in% names(init_param))){
     message('using old fit \n')
     params <- init_param}
@@ -495,8 +518,8 @@ Su_PO2PLS <- function(X, Y, Z, r, rx, ry, steps = 1e5, tol = 1e-6, init_param= c
       if(i == 1) logl[1] = E_next$logl
       logl[i+1] = E_next$logl
       
-      # influence of Z
-      z_inf[i] <- with(params_next, sd(X%*%W/sig2E)/sd(Z%*%a/sig2G))
+      # # influence of Z
+      # z_inf[i] <- with(params_next, sd(X%*%W/sig2E)/sd(Z%*%a/sig2G))
       
       #debug
       if(is.na(logl[i+1])) browser()
@@ -530,7 +553,7 @@ Su_PO2PLS <- function(X, Y, Z, r, rx, ry, steps = 1e5, tol = 1e-6, init_param= c
   params$B <- params$B %*% diag(signB,r)
   params$C <- params$C %*% diag(signB,r)
   params$b <- params$b %*% diag(signB,r)
-  ordSB <- order(diag(params$SigT), decreasing = TRUE)
+  ordSB <- order(diag(params$SigT %*% params$B), decreasing = TRUE)
   params$B <- params$B[ordSB,ordSB, drop=FALSE]
   params$W <- params$W[,ordSB, drop=FALSE]
   params$C <- params$C[,ordSB, drop=FALSE]
@@ -542,7 +565,7 @@ Su_PO2PLS <- function(X, Y, Z, r, rx, ry, steps = 1e5, tol = 1e-6, init_param= c
   
   # R-square Z fit 
   pre_z <- with(params, X%*%W%*%t(a) + Y%*%C%*%t(b))
-  zfit <- cor(pre_z,Z)^2
+  zfit <- as.numeric(cor(pre_z,Z)^2)
   
   message("Nr steps was ", i)
   message("Negative increments: ", any(diff(logl[1:i+1]) < 0), "\n",
@@ -550,7 +573,7 @@ Su_PO2PLS <- function(X, Y, Z, r, rx, ry, steps = 1e5, tol = 1e-6, init_param= c
           "; Last increment: ", signif(logl[i+1]-logl[i],4))
   message("Log-likelihood: ", logl[i+1])
   message("R-square of z fit: ", zfit)
-  outputt <- list(params = params, logl = logl[0:i+1][-1], zfit = zfit, z_inf = z_inf) #, debug = debug_list)
+  outputt <- list(params = params, logl = logl[0:i+1][-1], zfit = zfit) #, debug = debug_list)
   class(outputt) <- "PO2PLS"
   return(outputt)
 }

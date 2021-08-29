@@ -115,23 +115,50 @@ fun_com <- function(i, x,y,z,params){
                }
                ) %>% as.numeric()
   
-  Sig_xt <- with(params, Wo %*% SigTo %*% t(Wo) + diag(sig2E,p))
-  # rx <- ncol(params$Wo)
+  # Sig_xt <- with(params, Wo %*% SigTo %*% t(Wo) + diag(sig2E,p))
+  rx <- ncol(params$Wo)
   # Sig_xt_inv <- with(params, 1/sig2E*(diag(p) - 1/sig2E*Wo%*%MASS::ginv(MASS::ginv(SigTo)+1/sig2E*diag(rx))%*%t(Wo)))
-  # Sig_xt_det <- with(params, det(diag(rx)+1/sig2E*SigTo)*(sig2E^p))
-  x_t <- with(params,
-              (2*pi)^(-0.5*p) * det(Sig_xt)^(-0.5) *
-                exp(-0.5*(x-i$n[,1:r]%*%t(W))%*%MASS::ginv(Sig_xt)%*%t((x-i$n[,1:r]%*%t(W))))
-  ) %>% as.numeric()
+  Sig_xt_det <- with(params, det(diag(rx)+1/sig2E*SigTo)*(sig2E^p))
+  # x_t <- with(params,
+  #             (2*pi)^(-0.5*p) * Sig_xt_det^(-0.5) *
+  #               exp(-0.5*(x-i$n[,1:r]%*%t(W))%*%MASS::ginv(Sig_xt)%*%t((x-i$n[,1:r]%*%t(W))))
+  # ) %>% as.numeric()
   
-  Sig_yu <- with(params, Co %*% SigUo %*% t(Co) + diag(sig2F,q))
+  x_t <- with(params,
+              (2*pi)^(-0.5*p) * Sig_xt_det^(-0.5) *
+                exp(-0.5/sig2E*(
+                  (x-i$n[,1:r]%*%t(W))%*%t(x-i$n[,1:r]%*%t(W)) -
+                    1/sig2E*(
+                      (x-i$n[,1:r]%*%t(W))%*%Wo%*%MASS::ginv(MASS::ginv(SigTo)+1/sig2E*diag(rx))%*%
+                        (t(Wo)%*%t(x-i$n[,1:r]%*%t(W)))
+                    )
+                  ))) %>% as.numeric()
+  # print(all.equal(x_t_old,x_t))
+  
+  ry <- ncol(params$Co)
+  # Sig_yu <- with(params, Co %*% SigUo %*% t(Co) + diag(sig2F,q))
+  # Sig_yu_inv <- with(params, 1/sig2F*(diag(q) - 1/sig2F*Co%*%MASS::ginv(MASS::ginv(SigUo)+1/sig2F*diag(ry))%*%t(Co)))
+  Sig_yu_det <- with(params, det(diag(ry)+1/sig2F*SigUo)*(sig2F^q))
+  # y_u <- with(params,
+  #             (2*pi)^(-0.5*q) * Sig_yu_det^(-0.5) *
+  #               exp(-0.5*(y-i$n[,r+1:r]%*%t(C))%*%MASS::ginv(Sig_yu)%*%t((y-i$n[,r+1:r]%*%t(C))))
+  # ) %>% as.numeric()
+  
   y_u <- with(params,
-              (2*pi)^(-0.5*q) * det(Sig_yu)^(-0.5) *
-                exp(-0.5*(y-i$n[,r+1:r]%*%t(C))%*%MASS::ginv(Sig_yu)%*%t((y-i$n[,r+1:r]%*%t(C))))
-  ) %>% as.numeric()
+              (2*pi)^(-0.5*q) * Sig_yu_det^(-0.5) *
+                exp(-0.5/sig2F*(
+                  (y-i$n[,r+1:r]%*%t(C))%*%t(y-i$n[,r+1:r]%*%t(C)) -
+                    1/sig2F*(
+                      (y-i$n[,r+1:r]%*%t(C))%*%Co%*%MASS::ginv(MASS::ginv(SigUo)+1/sig2F*diag(ry))%*%
+                        (t(Co)%*%t(y-i$n[,r+1:r]%*%t(C)))
+                    )
+                  ))) %>% as.numeric()
+  # print(all.equal(y_u_old,y_u))
+  
   
   # print(c(z_tu, x_t, y_u, i$w))
   ## test likelihood without z
   # return(x_t*y_u*i$w)
+  
   return(z_tu*x_t*y_u*i$w)
 }
