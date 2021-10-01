@@ -5,13 +5,11 @@ generate_params_bi <- function(X, Y, Z, r, rx, ry, alpha_x = 0.1, alpha_y = 0.1,
   p = ifelse(is.matrix(X) | type != "random", ncol(X), X)
   q = ifelse(is.matrix(Y) | type != "random", ncol(Y), Y)
   if(type=="o2m"){
-    stop("use random now")
     fit <- o2m(X, Y, r, rx, ry, stripped=TRUE)
+    x_tp <- with(fit, cbind(Tt,U-Tt))
+    ab <- as.vector(glm(Z~x_tp, family = 'binomial')$coef)
+    print(ab)
     return(with(fit, {
-      x_tp <- cbind(Tt,U)
-      ab <- MASS::ginv((t(x_tp) %*% x_tp)) %*% t(x_tp) %*% Z
-      a = t(ab[1:r,])
-      b = t(ab[(r+1):(2*r),])
       list(
         W = W.,
         Wo = suppressWarnings(orth(P_Yosc.)),
@@ -24,9 +22,9 @@ generate_params_bi <- function(X, Y, Z, r, rx, ry, alpha_x = 0.1, alpha_y = 0.1,
         SigH = cov(H_UT)*diag(1,r),
         sig2E = (ssq(X)-ssq(Tt)-ssq(T_Yosc))/prod(dim(X)) + 0.01,
         sig2F = (ssq(Y)-ssq(U)-ssq(U_Xosc))/prod(dim(Y)) + 0.01,
-        a = a,
-        b = b,
-        sig2G = as.numeric(cov(Z-Tt%*%t(a)-U%*%t(b)))
+        a0 = ab[1],
+        a = t(ab[1+1:r]),
+        b = t(ab[(1+r)+1:r])
       )}))
   }
   if(type=="random"){

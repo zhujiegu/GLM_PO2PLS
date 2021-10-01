@@ -8,7 +8,7 @@ library(parallel)
 
 #######
 # set up
-N=50;p=10;q=10
+N=100;p=20;q=10
 r=1
 rx=1
 ry=1
@@ -50,13 +50,19 @@ abline(h = true_l, col = 'red')
 ###############################################
 
 # fit supervised PO2PLS
-fit <- Su_PO2PLS_bi(X, Y, Z, r, 1, 1, steps = 20, level=6, Nr.core =1,init_param = 'random')
-fit2 <- Su_PO2PLS_bi(X, Y, Z, r, rx, ry, steps = 10, level=30, Nr.core =3,init_param = params)
-fit2 <- Su_PO2PLS_bi(X, Y, Z, r, rx, ry, steps = 10, level=30, Nr.core =3,init_param = 'random')
+fit <- Su_PO2PLS_bi(X, Y, Z, r, rx, ry, steps = 8, level=19, Nr.core =4,init_param = params)
+fit2 <- Su_PO2PLS_bi(X, Y, Z, r, rx, ry, steps = 10, level=30, Nr.core =4,init_param = params)
+fit2 <- Su_PO2PLS_bi(X, Y, Z, r, rx, ry, steps = 10, level=30, Nr.core =1,init_param = 'random')
 
 fit_o2 <- PO2PLS::PO2PLS(X, Y, r, rx, ry, steps = 200, init_param = "random")
 
 fit_su <- Su_PO2PLS(X, Y, Z, r, rx, ry, steps = 200, init_param = "random")
+
+
+crossprod(fit$params$W, params$W)
+crossprod(fit$params$Wo, params$Wo)
+crossprod(fit$params$C, params$C)
+crossprod(fit$params$Co, params$Co)
 
 crossprod(fit2$params$W, params$W)
 crossprod(fit2$params$Wo, params$Wo)

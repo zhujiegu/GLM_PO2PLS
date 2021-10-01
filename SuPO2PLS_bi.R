@@ -33,6 +33,9 @@ E_step_bi <- function(X, Y, Z, params, level = level, Nr.core=1){
   ## likelihood of each sample
   list_lik <- lapply(list_com, function(e) sum(unlist(e)))
   #################################################
+  ## when likelihood is numerically 0
+  # idx_zero <- which(unlist(list_lik) == 0)
+  #################################################
   ## # E(tu|xyz) with numerical integration
   # different part in integrand
   int_diff <- list_nodes
@@ -40,6 +43,7 @@ E_step_bi <- function(X, Y, Z, params, level = level, Nr.core=1){
   mu_TU <- lapply(1:N, function(e) Reduce("+", Map("*", int_diff, list_com[[e]])))
   # divide by the marginal likelihood of each sample
   mu_TU <- Map("/", mu_TU, list_lik)
+  mu_TU <- rapply(mu_TU, f=function(x) ifelse(is.nan(x),0,x), how="replace")
   mu_TU <- mu_TU %>% unlist %>% matrix(nrow=2) %>% t
   #################################################
   ## # E(Sttuu|xyz) with numerical integration
@@ -49,6 +53,8 @@ E_step_bi <- function(X, Y, Z, params, level = level, Nr.core=1){
   S_ttuu <- lapply(1:N, function(e) Reduce("+", Map("*", int_diff, list_com[[e]])))
   # divide by the marginal likelihood of each sample
   S_ttuu <- Map("/", S_ttuu, list_lik)
+  S_ttuu <- rapply(S_ttuu, f=function(x) ifelse(is.nan(x),0,x), how="replace")
+  
   # # 2r x 2r, Average across N samples
   # S_ttuu <- Reduce("+", S_ttuu)/N
   
@@ -114,6 +120,7 @@ GH_Q_ab <- function(beta, l_n=list_nodes_th,Z.=Z,l_com=list_com,l_lik=list_lik){
   Q_ab <- lapply(1:N, function(e) Reduce("+", Map("*", int_diff_z[[e]], l_com[[e]])))
   # divide by the marginal likelihood of each sample
   Q_ab <- Map("/", Q_ab, l_lik)
+  Q_ab <- rapply(Q_ab, f=function(x) ifelse(is.nan(x),0,x), how="replace")
   # Add N samples
   Q_ab <- Reduce("+", Q_ab)
   return(Q_ab)
@@ -142,6 +149,7 @@ GH_grd_ab <- function(beta, l_n=list_nodes_th,Z.=Z,l_com=list_com,l_lik=list_lik
   grd_ab <- lapply(1:N, function(e) Reduce("+", Map("*", int_diff_z[[e]], l_com[[e]])))
   # divide by the marginal likelihood of each sample
   grd_ab <- Map("/", grd_ab, l_lik)
+  grd_ab <- rapply(grd_ab, f=function(x) ifelse(is.nan(x),0,x), how="replace")
   # Add N samples
   grd_ab <- Reduce("+", grd_ab)
   return(grd_ab)
@@ -166,7 +174,11 @@ M_step_bi <- function(E_fit, params, X, Y, Z, orth_type = c("SVD","QR")){
     Stt <- S_ttuu_avgN[1:r,1:r,drop=FALSE]
     Suu <- S_ttuu_avgN[r+1:r,r+1:r,drop=FALSE]
     Stu <- S_ttuu_avgN[1:r,r+1:r,drop=FALSE]
-    Shh <- Suu - t(Stu)%*%B - t(B)%*%Stu + t(B)%*%Stt%*%B
+    Shh <- Suu - t(Stu)%*%params$B - t(params$B)%*%Stu + t(params$B)%*%Stt%*%params$B
+    
+    # print(S_ttuu_avgN)
+    # print(cbind(Stt, Suu, Shh))
+    
     
     # filter out samples with negative sig2E or sig2F
     # Stt, Suu different for each sample
@@ -189,24 +201,20 @@ M_step_bi <- function(E_fit, params, X, Y, Z, orth_type = c("SVD","QR")){
     #            sum(diag(Suu)) - sum(diag(params$SigUo)))
     # })
     
-    # which samples have positive sig2E or sig2F
-    idx_posE <- which(tmp_sig2E>0)
-    idx_posF <- which(tmp_sig2F>0)
-    if(length(idx_posE)==0 | length(idx_posF)==0){
-      stop("all samples have negative sig2E or sig2F")
-    }
+    # # which samples have positive sig2E or sig2F
+    # idx_posE <- which(tmp_sig2E>0)
+    # idx_posF <- which(tmp_sig2F>0)
     
-    nr_negE <- N - length(idx_posE)
-    nr_negF <- N - length(idx_posF)
+    # if(length(idx_posE)==0 | length(idx_posF)==0){
+    #   stop("all samples have negative sig2E or sig2F")
+    # }
     
-    print(nr_negE); print(nr_negF)
-    print(tmp_sig2E)
-    print(tmp_sig2F)
-    # print(mean(tmp_sig2E))
-    # print(mean(tmp_sig2F))
+    # nr_negE <- N - length(idx_posE)
+    # nr_negF <- N - length(idx_posF)
     
-    # tmp_sig2E[tmp_sig2E<0] <- 0
-    # tmp_sig2F[tmp_sig2F<0] <- 0
+    # print(nr_negE); print(nr_negF)
+    # print(tmp_sig2E)
+    # print(tmp_sig2F)
     
     params$sig2E = mean(tmp_sig2E)
     params$sig2F = mean(tmp_sig2F)
@@ -249,7 +257,7 @@ M_step_bi <- function(E_fit, params, X, Y, Z, orth_type = c("SVD","QR")){
     # params$Co = dcmp_varyo$u
     # params$SigUo = diag(x=dcmp_varyo$d[1:ry], nrow=ry)
     
-    print(str(params))
+    # print(str(params))
 
     
     # Orthogonal loadings are eigen vectors, variance matrices contain the eigen values
@@ -373,6 +381,7 @@ Su_PO2PLS_bi <- function(X, Y, Z, r, rx, ry, steps = 1e5, tol = 1e-6, level=leve
       if(i %in% c(1, 1e1, 1e2, 1e3, 5e3, 1e4, 4e4)) {
         print(data.frame(row.names = 1, steps = i, time = unname(proc.time()-tic)[3], diff = logl[i+1]-logl[i], logl = logl[i+1]))
       }
+      # solve(0)
       if(logl[i+1] > max(logl[1:i])) params_max <- params_next
       params = params_next
       
