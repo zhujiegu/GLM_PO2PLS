@@ -28,7 +28,7 @@ GH_com <- function(Nr.cores=1, level=6, X,Y,Z, params, plot_nodes=F){
   # make list
   n_w <- lapply(seq_len(nrow(nodes)), function(i) list(n = nodes[i, ,drop=F], w = w[i]))
   
-  list_com <- mclapply(1:N, mc.cores = Nr.cores, function(e){
+  list_com_log <- mclapply(1:N, mc.cores = Nr.cores, function(e){
     lapply(n_w, fun_com, x=X[e,],y=Y[e,],z=Z[e], params=params)
   })
   # browser()
@@ -36,7 +36,7 @@ GH_com <- function(Nr.cores=1, level=6, X,Y,Z, params, plot_nodes=F){
   # lapply(n_w, fun_com, x=x[e,],y=y[e,],z=z[e], params=params)
 
   nodes <- lapply(seq_len(nrow(nodes)), function(i) nodes[i, ,drop=F])
-  return(list(list_com=list_com, nodes=nodes))
+  return(list(list_com_log=list_com_log, nodes=nodes))
 }
 
 
@@ -115,7 +115,7 @@ fun_com <- function(i, x,y,z,params){
                  1/(1+exp((cbind(1,i$n) %*% t(alpha))))
                }
                ) %>% as.numeric()
-  
+
   # Sig_xt <- with(params, Wo %*% SigTo %*% t(Wo) + diag(sig2E,p))
   rx <- ncol(params$Wo)
   # Sig_xt_inv <- with(params, 1/sig2E*(diag(p) - 1/sig2E*Wo%*%MASS::ginv(MASS::ginv(SigTo)+1/sig2E*diag(rx))%*%t(Wo)))
@@ -136,13 +136,15 @@ fun_com <- function(i, x,y,z,params){
   #                 ))) %>% as.numeric()
   # print(all.equal(x_t_old,x_t))
   Sig_xt_det_log <- with(params, log(det(diag(rx)+1/sig2E*SigTo)) + p*log(sig2E))
-  x_t <- with(params, exp(-0.5*(
+  
+  # log(f(x|t))
+  l_xt <- with(params, -0.5*(
     p*log(2*pi) + Sig_xt_det_log + 1/sig2E*(
       (x-i$n[,1:r]%*%t(W))%*%t(x-i$n[,1:r]%*%t(W)) -
         1/sig2E*(
           (x-i$n[,1:r]%*%t(W))%*%Wo%*%MASS::ginv(MASS::ginv(SigTo)+1/sig2E*diag(rx))%*%
             (t(Wo)%*%t(x-i$n[,1:r]%*%t(W)))
-        ))))) %>% as.numeric()
+        )))) %>% as.numeric()
 
   # # without orthogonal part
   # x_t_noot <- with(params, exp(-0.5*(
@@ -151,7 +153,7 @@ fun_com <- function(i, x,y,z,params){
   
   # if(!all.equal(x_t,x_t_old)) stop("x_t wrong")
   # browser()
-  if(x_t==Inf) browser()
+  # if(x_t==Inf) browser()
   
   ry <- ncol(params$Co)
   # Sig_yu <- with(params, Co %*% SigUo %*% t(Co) + diag(sig2F,q))
@@ -173,13 +175,15 @@ fun_com <- function(i, x,y,z,params){
   #                 ))) %>% as.numeric()
   
   Sig_yu_det_log <- with(params, log(det(diag(ry)+1/sig2F*SigUo)) + q*log(sig2F))
-  y_u <- with(params, exp(-0.5*(
+  
+  # log(f(y|u))
+  l_yu <- with(params, -0.5*(
     q*log(2*pi) + Sig_yu_det_log + 1/sig2F*(
       (y-i$n[,r+1:r]%*%t(C))%*%t(y-i$n[,r+1:r]%*%t(C)) -
         1/sig2F*(
           (y-i$n[,r+1:r]%*%t(C))%*%Co%*%MASS::ginv(MASS::ginv(SigUo)+1/sig2F*diag(ry))%*%
             (t(Co)%*%t(y-i$n[,r+1:r]%*%t(C)))
-        ))))) %>% as.numeric()
+        )))) %>% as.numeric()
 
   # print(all.equal(y_u_old,y_u))
   # browser()
@@ -187,5 +191,6 @@ fun_com <- function(i, x,y,z,params){
   ## test likelihood without z
   # return(x_t*y_u*i$w)
   
-  return(z_tu*x_t*y_u*i$w)
+  # return(z_tu*x_t*y_u*i$w)
+  return(log(z_tu) + l_xt + l_yu + log(i$w))
 }

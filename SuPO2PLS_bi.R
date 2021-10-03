@@ -27,33 +27,43 @@ E_step_bi <- function(X, Y, Z, params, level = level, Nr.core=1){
   #################################################
   ## Numerical integration of the common part and store the results (all sample combined)
   common <- GH_com(Nr.cores=Nr.core, level=level, X,Y,Z, params, plot_nodes=F)
-  list_com <- common$list_com # values of common parts (list(length N) of list (dim^Q))
+  list_com_log <- common$list_com_log # values of common parts (list(length N) of list (dim^Q))
   list_nodes <- common$nodes
+  # divide both numerator and denominator by exp(max), to avoid "Inf"
+  list_com_sub <- lapply(list_com_log, function(e){
+    e <- unlist(e)
+    max_e <- max(e)
+    as.list(exp(e-max_e))
+  }
+  )
   #################################################
   ## likelihood of each sample
-  list_lik <- lapply(list_com, function(e) sum(unlist(e)))
+  list_lik_log <- lapply(list_com_log, function(e){
+    e <- unlist(e)
+    max_e <- max(e)
+    return(max_e + log(sum(exp(e-max_e))))
+  })
   #################################################
   ## when likelihood is numerically 0
   # idx_zero <- which(unlist(list_lik) == 0)
   #################################################
+  # Denominator = f(x,y,z)/exp(max)
+  dnmt <- lapply(1:N, function(e) Reduce("+", list_com_sub[[e]]))
+  #################################################
   ## # E(tu|xyz) with numerical integration
   # different part in integrand
   int_diff <- list_nodes
-  # combine common parts
-  mu_TU <- lapply(1:N, function(e) Reduce("+", Map("*", int_diff, list_com[[e]])))
-  # divide by the marginal likelihood of each sample
-  mu_TU <- Map("/", mu_TU, list_lik)
-  mu_TU <- rapply(mu_TU, f=function(x) ifelse(is.nan(x),0,x), how="replace")
+  # Numerator
+  mu_TU_nu <- lapply(1:N, function(e) Reduce("+", Map("*", int_diff, list_com_sub[[e]])))
+  mu_TU <- Map("/", mu_TU_nu, dnmt)
   mu_TU <- mu_TU %>% unlist %>% matrix(nrow=2) %>% t
   #################################################
   ## # E(Sttuu|xyz) with numerical integration
   # different part in integrand
   int_diff <- lapply(list_nodes, crossprod)
-  # combine common parts
-  S_ttuu <- lapply(1:N, function(e) Reduce("+", Map("*", int_diff, list_com[[e]])))
-  # divide by the marginal likelihood of each sample
-  S_ttuu <- Map("/", S_ttuu, list_lik)
-  S_ttuu <- rapply(S_ttuu, f=function(x) ifelse(is.nan(x),0,x), how="replace")
+  # Numerator
+  S_ttuu_nu <- lapply(1:N, function(e) Reduce("+", Map("*", int_diff, list_com_sub[[e]])))
+  S_ttuu <- Map("/", S_ttuu_nu, dnmt)
   
   # # 2r x 2r, Average across N samples
   # S_ttuu <- Reduce("+", S_ttuu)/N
@@ -71,21 +81,21 @@ E_step_bi <- function(X, Y, Z, params, level = level, Nr.core=1){
   beta <- cbind(a0,a,b)
 
   # Numerical estimation of Q_ab and gradient
-  Q_ab <- GH_Q_ab(beta,list_nodes_th,Z,list_com,list_lik)
-  grd_ab <- GH_grd_ab(beta,list_nodes_th,Z,list_com,list_lik)
+  Q_ab <- GH_Q_ab(beta,list_nodes_th,Z,list_com_sub,dnmt)
+  grd_ab <- GH_grd_ab(beta,list_nodes_th,Z,list_com_sub,dnmt)
   # Backtracking rule to find the step size s
   s = 1
-  Q_ab_new <- GH_Q_ab(beta - s*grd_ab,list_nodes_th,Z,list_com,list_lik)
+  Q_ab_new <- GH_Q_ab(beta + s*grd_ab,list_nodes_th,Z,list_com_sub,dnmt)
 
   while(Q_ab_new < Q_ab + 0.5*s*tcrossprod(grd_ab)){
     s = 0.8*s
     # print(s)
-    Q_ab_new <- GH_Q_ab(beta + s*grd_ab,list_nodes_th,Z,list_com,list_lik)
+    Q_ab_new <- GH_Q_ab(beta + s*grd_ab,list_nodes_th,Z,list_com_sub,dnmt)
   }
   
   #################################################
   ## log likelihood
-  logl <- list_lik %>% unlist %>% log %>% sum
+  logl <- list_lik_log %>% unlist %>% sum
   # print(list_lik %>% unlist %>% log)
   #################################################
   list(
@@ -103,7 +113,7 @@ E_step_bi <- function(X, Y, Z, params, level = level, Nr.core=1){
 }
 
 ## function for numerical integration of Q_ab
-GH_Q_ab <- function(beta, l_n=list_nodes_th,Z.=Z,l_com=list_com,l_lik=list_lik){
+GH_Q_ab <- function(beta, l_n=list_nodes_th,Z.=Z,l_com=list_com_sub,de=dnmt){
   # log probability of z=1 and z=0
   z1 <- lapply(l_n, function(e) log(as.numeric(1/(1+exp(-(cbind(1,e) %*% t(beta)))))))
   z0 <- lapply(l_n, function(e) log(as.numeric(1/(1+exp((cbind(1,e) %*% t(beta)))))))
@@ -118,16 +128,14 @@ GH_Q_ab <- function(beta, l_n=list_nodes_th,Z.=Z,l_com=list_com,l_lik=list_lik){
   
   # combine common parts
   Q_ab <- lapply(1:N, function(e) Reduce("+", Map("*", int_diff_z[[e]], l_com[[e]])))
-  # divide by the marginal likelihood of each sample
-  Q_ab <- Map("/", Q_ab, l_lik)
-  Q_ab <- rapply(Q_ab, f=function(x) ifelse(is.nan(x),0,x), how="replace")
+  Q_ab <- Map("/", Q_ab, de)
   # Add N samples
   Q_ab <- Reduce("+", Q_ab)
   return(Q_ab)
 }
 
 ## function for numerical integration of gradient of Q_ab
-GH_grd_ab <- function(beta, l_n=list_nodes_th,Z.=Z,l_com=list_com,l_lik=list_lik){
+GH_grd_ab <- function(beta, l_n=list_nodes_th,Z.=Z,l_com=list_com_sub,de=dnmt){
   # Q'_ab
   z1 <- lapply(l_n, function(e) {
     cbind(1,e)*as.numeric(exp(-(cbind(1,e) %*% t(beta))))/
@@ -147,9 +155,7 @@ GH_grd_ab <- function(beta, l_n=list_nodes_th,Z.=Z,l_com=list_com,l_lik=list_lik
   })
   # combine common parts
   grd_ab <- lapply(1:N, function(e) Reduce("+", Map("*", int_diff_z[[e]], l_com[[e]])))
-  # divide by the marginal likelihood of each sample
-  grd_ab <- Map("/", grd_ab, l_lik)
-  grd_ab <- rapply(grd_ab, f=function(x) ifelse(is.nan(x),0,x), how="replace")
+  grd_ab <- Map("/", grd_ab, de)
   # Add N samples
   grd_ab <- Reduce("+", grd_ab)
   return(grd_ab)

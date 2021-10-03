@@ -8,10 +8,10 @@ library(parallel)
 
 #######
 # set up
-N=100;p=20;q=10
+N=50;p=1000;q=10
 r=1
-rx=1
-ry=1
+rx=0
+ry=0
 
 # generate data
 x <- matrix(rnorm(p*N), N,p)
@@ -50,7 +50,7 @@ abline(h = true_l, col = 'red')
 ###############################################
 
 # fit supervised PO2PLS
-fit <- Su_PO2PLS_bi(X, Y, Z, r, rx, ry, steps = 8, level=19, Nr.core =4,init_param = params)
+fit <- Su_PO2PLS_bi(X, Y, Z, r, rx, ry, steps = 50, level=9, Nr.core =4,init_param = "random")
 fit2 <- Su_PO2PLS_bi(X, Y, Z, r, rx, ry, steps = 10, level=30, Nr.core =4,init_param = params)
 fit2 <- Su_PO2PLS_bi(X, Y, Z, r, rx, ry, steps = 10, level=30, Nr.core =1,init_param = 'random')
 
