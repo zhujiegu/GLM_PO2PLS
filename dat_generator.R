@@ -27,6 +27,7 @@ generate_params_bi <- function(X, Y, Z, r, rx, ry, alpha_x = 0.1, alpha_y = 0.1,
         b = t(ab[(1+r)+1:r])
       )}))
   }
+  
   if(type=="random"){
     outp <- list(
       W = orth(matrix(rnorm(p*r), p, r)+1),
@@ -38,6 +39,30 @@ generate_params_bi <- function(X, Y, Z, r, rx, ry, alpha_x = 0.1, alpha_y = 0.1,
       SigT = diag(sort(runif(r,1,3),decreasing = TRUE),r),
       SigTo = sign(rx)*diag(sort(runif(max(1,rx),1,3),decreasing = TRUE),max(1,rx)),
       SigUo = sign(ry)*diag(sort(runif(max(1,ry),1,3),decreasing = TRUE),max(1,ry)),
+      a0=a0,
+      a = a,
+      b = b
+    )
+    outp$SigH = diag(alpha_tu/(1-alpha_tu)*(diag(outp$SigT%*%outp$B^2)), r) #cov(H_UT)*diag(1,r),
+    outp$SigU <- with(outp, SigT %*% B^2 + SigH)
+    return(with(outp, {
+      c(outp,
+        sig2E = alpha_x/(1-alpha_x)*(mean(diag(SigT)) + mean(diag(SigTo)))/p,
+        sig2F = alpha_y/(1-alpha_y)*(mean(diag(SigT%*%B^2 + SigH)) + mean(diag(SigUo)))/q)
+    }))
+  }
+  
+  if(type=="specify"){
+    outp <- list(
+      W = orth(matrix(rnorm(p*r), p, r)+1),
+      Wo = suppressWarnings(sign(rx)*orth(matrix(rnorm(p*max(1,rx)), p, max(1,rx))+seq(-p/2,p/2,length.out = p))),
+      C = orth(matrix(rnorm(q*r), q, r)+1),
+      Co = suppressWarnings(sign(ry)*orth(matrix(rnorm(q*max(1,rx)), q, max(1,ry))+seq(-q/2,q/2,length.out = q))),
+      B = diag(B, r),
+      # B = diag(sort(runif(r,1,1),decreasing = TRUE),r), # set to 1 for simulation
+      SigT = diag(3,r),
+      SigTo = sign(rx)*diag(3,max(1,rx)),
+      SigUo = sign(ry)*diag(3,max(1,ry)),
       a0=a0,
       a = a,
       b = b

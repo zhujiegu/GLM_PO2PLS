@@ -50,7 +50,7 @@ abline(h = true_l, col = 'red')
 ###############################################
 
 # fit supervised PO2PLS
-fit <- Su_PO2PLS_bi(X, Y, Z, r, rx, ry, steps = 50, level=9, Nr.core =4,init_param = "random")
+fit <- Su_PO2PLS_bi(X, Y, Z, r, rx, ry, steps = 5, level=9, Nr.core =4,init_param = "o2m")
 fit2 <- Su_PO2PLS_bi(X, Y, Z, r, rx, ry, steps = 10, level=30, Nr.core =4,init_param = params)
 fit2 <- Su_PO2PLS_bi(X, Y, Z, r, rx, ry, steps = 10, level=30, Nr.core =1,init_param = 'random')
 

@@ -28,7 +28,7 @@ GH_com <- function(Nr.cores=1, level=6, X,Y,Z, params, plot_nodes=F){
   # make list
   n_w <- lapply(seq_len(nrow(nodes)), function(i) list(n = nodes[i, ,drop=F], w = w[i]))
   
-  list_com_log <- mclapply(1:N, mc.cores = Nr.cores, function(e){
+  list_com_log <- parallel::mclapply(1:N, mc.cores = Nr.cores, function(e){
     lapply(n_w, fun_com, x=X[e,],y=Y[e,],z=Z[e], params=params)
   })
   # browser()
@@ -107,6 +107,7 @@ GH_Intl <- function(func, div_mrg=F, dim=2*r, level=6, x,y,z, params, plot_nodes
 # common part of every integral
 # f(z|tu) * f(x|t) * f(y|u)
 fun_com <- function(i, x,y,z,params){
+  r <- ncol(params$SigT)
   alpha <- with(params, cbind(a0,a-b%*%B,b))
   z_tu <- with(params, 
                if(z==1){
