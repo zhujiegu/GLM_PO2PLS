@@ -914,8 +914,17 @@ E_step_bi <- function(X, Y, Z, params, level = level, Nr.core=1){
 ## function for numerical integration of Q_ab
 GH_Q_ab <- function(beta, l_n=list_nodes_th,Z.=Z,l_com=list_com_sub,de=dnmt){
   # log probability of z=1 and z=0
-  z1 <- lapply(l_n, function(e) log(as.numeric(1/(1+exp(-(cbind(1,e) %*% t(beta)))))))
-  z0 <- lapply(l_n, function(e) log(as.numeric(1/(1+exp((cbind(1,e) %*% t(beta)))))))
+  z1 <- lapply(l_n, function(e){
+    a_tmp <- as.numeric(-(cbind(1,e) %*% t(beta)))
+    m <- max(0, a_tmp)
+    -(m + log(exp(-m) + exp(a_tmp-m)))
+  })
+  z0 <- lapply(l_n, function(e){
+    a_tmp <- as.numeric(cbind(1,e) %*% t(beta))
+    m <- max(0, a_tmp)
+    -(m + log(exp(-m) + exp(a_tmp-m)))
+  })
+  
   # different part in integrand
   int_diff_z <- lapply(Z., function(z){
     if(z){
@@ -927,6 +936,7 @@ GH_Q_ab <- function(beta, l_n=list_nodes_th,Z.=Z,l_com=list_com_sub,de=dnmt){
   
   # combine common parts
   Q_ab <- lapply(1:N, function(e) Reduce("+", Map("*", int_diff_z[[e]], l_com[[e]])))
+  # Q_ab <- rapply(Q_ab, f=function(x) ifelse(is.nan(x),0,x), how="replace")
   Q_ab <- Map("/", Q_ab, de)
   # Add N samples
   Q_ab <- Reduce("+", Q_ab)
@@ -936,14 +946,18 @@ GH_Q_ab <- function(beta, l_n=list_nodes_th,Z.=Z,l_com=list_com_sub,de=dnmt){
 ## function for numerical integration of gradient of Q_ab
 GH_grd_ab <- function(beta, l_n=list_nodes_th,Z.=Z,l_com=list_com_sub,de=dnmt){
   # Q'_ab
-  z1 <- lapply(l_n, function(e) {
-    cbind(1,e)*as.numeric(exp(-(cbind(1,e) %*% t(beta))))/
-      (1+as.numeric(exp(-(cbind(1,e) %*% t(beta)))))
+  z1 <- lapply(l_n, function(e){
+    a_tmp <- as.numeric(-(cbind(1,e) %*% t(beta)))
+    m <- max(0, a_tmp)
+    exp(a_tmp-m)/(exp(-m) + exp(a_tmp-m)) * cbind(1,e)
   })
-  z0 <- lapply(l_n, function(e) {
-    -cbind(1,e)*as.numeric(exp((cbind(1,e) %*% t(beta))))/
-      (1+as.numeric(exp((cbind(1,e) %*% t(beta)))))
+  z0 <- lapply(l_n, function(e){
+    a_tmp <- as.numeric(cbind(1,e) %*% t(beta))
+    m <- max(0, a_tmp)
+    - exp(a_tmp-m)/(exp(-m) + exp(a_tmp-m)) * cbind(1,e)
   })
+  
+  
   # different part in integrand
   int_diff_z <- lapply(Z., function(z){
     if(z){
@@ -954,6 +968,7 @@ GH_grd_ab <- function(beta, l_n=list_nodes_th,Z.=Z,l_com=list_com_sub,de=dnmt){
   })
   # combine common parts
   grd_ab <- lapply(1:N, function(e) Reduce("+", Map("*", int_diff_z[[e]], l_com[[e]])))
+  # grd_ab <- rapply(grd_ab, f=function(x) ifelse(is.nan(x),0,x), how="replace")
   grd_ab <- Map("/", grd_ab, de)
   # Add N samples
   grd_ab <- Reduce("+", grd_ab)
@@ -1120,6 +1135,7 @@ svd_orthpart <- function(dat, ld, sig, mu, S, rs, tol=1e-10, max_powerit = 10000
 
 
 #' @export
+#' @param Z vector of 1 and 0. 1 for case, 0 for control.
 Su_PO2PLS_bi <- function(X, Y, Z, r, rx, ry, steps = 1e5, tol = 1e-6, level=level, Nr.core =1, init_param= c('random','o2m'),
                          orth_type = "SVD", random_restart = FALSE){
   # if(all(c("W","Wo","C","Co","B","SigT","SigTo","SigUo","SigH","sig2E","sig2F") %in% names(init_param))) {cat('using old fit \n'); params <- init_param}
@@ -1127,6 +1143,10 @@ Su_PO2PLS_bi <- function(X, Y, Z, r, rx, ry, steps = 1e5, tol = 1e-6, level=leve
   
   # debug_list <- list()
   # z_inf <- c()
+  
+  # Check Z
+  
+  
   if(all(c("W","Wo","C","Co","B","SigT","SigTo","SigUo","SigH","sig2E","sig2F","a0","a","b") %in% names(init_param))){
     message('using old fit \n')
     params <- init_param}
@@ -1222,9 +1242,10 @@ Su_PO2PLS_bi <- function(X, Y, Z, r, rx, ry, steps = 1e5, tol = 1e-6, level=leve
   # # R-square Z fit 
   pre_z <- with(params, a0 + X%*%W%*%(t(a)-B%*%t(b)) + Y%*%C%*%t(b))
   z_p <- 1/(1+exp(-pre_z))
-  pre_z <- as.factor(z_p > 0.5)
-  zfit <- table(pre_z,Z)
-  acc <- (zfit[1,1] + zfit[2,2])/sum(zfit)
+  pre_z <- ifelse(z_p > 0.5, 1,0)
+  levs <- c(0,1)
+  zfit <- table(factor(pre_z, levs), factor(Z, levs))
+  acc <- caret::confusionMatrix(zfit)$overall['Accuracy']
   
   message("Nr steps was ", i)
   message("Negative increments: ", any(diff(logl[1:i+1]) < 0), "\n",
