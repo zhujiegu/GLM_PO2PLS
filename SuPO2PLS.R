@@ -664,9 +664,6 @@ sd_ab <- function(fit, X, Y, Z, b_on_h = T){
   return(list(a = sd_ab[1:r], b = sd_ab[r+1:r]))
 }
 
-#####
-# binary outcome
-
 #' @export
 generate_params_bi <- function(X, Y, Z, r, rx, ry, alpha_x = 0.1, alpha_y = 0.1, alpha_tu = 0.1, 
                                B=1, a0=0,a=t(2),b=t(1), type=c('o2m','random','specify')){
@@ -790,16 +787,17 @@ generate_data_bi <- function(N, params, distr = rnorm){
   EF <- cbind(scale(matrix(rnorm(N*p), N))*sqrt(sig2E), 
               scale(matrix(rnorm(N*q), N))*sqrt(sig2F))
   
-  prob_z <- 1/(1+exp(-(a0 + M[,1:2*r]%*%t(cbind(a-b%*%B,b)))))
+  mu_z <- a0 + M[,1:2*r]%*%t(cbind(a-b%*%B,b))
+  prob_z <- 1/(1+exp(-mu_z))
   # print(cbind(M[,1:2*r],prob_z))
   Z <- rbinom(N, 1, prob_z)
-  cbind(M %*% t(Gamma) + EF, Z)
+  return(list(dat = cbind(M %*% t(Gamma) + EF, Z), trueTU = M[,1:2*r], mu_z = mu_z))
 }
 
 
 #' @export
 E_step_bi <- function(X, Y, Z, params, level = level, Nr.core=1){
-  ## retrieve parameters
+  # retrieve parameters
   W = params$W
   C = params$C
   Wo = params$Wo
@@ -815,7 +813,7 @@ E_step_bi <- function(X, Y, Z, params, level = level, Nr.core=1){
   a0 = params$a0
   a = params$a
   b = params$b
-  ## define dimensions
+  # define dimensions
   N = nrow(X)
   p = nrow(W)
   q = nrow(C)
@@ -823,8 +821,7 @@ E_step_bi <- function(X, Y, Z, params, level = level, Nr.core=1){
   rx = ncol(Wo)
   ry = ncol(Co)
   
-  #################################################
-  ## Numerical integration of the common part and store the results (all sample combined)
+  # Numerical integration of the common part and store the results (all sample combined)
   common <- GH_com(Nr.cores=Nr.core, level=level, X,Y,Z, params, plot_nodes=F)
   list_com_log <- common$list_com_log # values of common parts (list(length N) of list (dim^Q))
   list_nodes <- common$nodes
@@ -835,43 +832,38 @@ E_step_bi <- function(X, Y, Z, params, level = level, Nr.core=1){
     as.list(exp(e-max_e))
   }
   )
-  #################################################
-  ## likelihood of each sample
+
+  # likelihood of each sample
   list_lik_log <- lapply(list_com_log, function(e){
     e <- unlist(e)
     max_e <- max(e)
     return(max_e + log(sum(exp(e-max_e))))
   })
-  #################################################
-  ## when likelihood is numerically 0
-  # idx_zero <- which(unlist(list_lik) == 0)
-  #################################################
+
   # Denominator = f(x,y,z)/exp(max)
   dnmt <- lapply(1:N, function(e) Reduce("+", list_com_sub[[e]]))
-  #################################################
-  ## # E(tu|xyz) with numerical integration
-  # different part in integrand
+
+  # E(tu|xyz) with numerical integration
+  ## different part in integrand
   int_diff <- list_nodes
-  # Numerator
+  ## Numerator
   mu_TU_nu <- lapply(1:N, function(e) Reduce("+", Map("*", int_diff, list_com_sub[[e]])))
   mu_TU <- Map("/", mu_TU_nu, dnmt)
   mu_TU <- mu_TU %>% unlist %>% matrix(nrow=2) %>% t
-  #################################################
-  ## # E(Sttuu|xyz) with numerical integration
-  # different part in integrand
+
+  # E(Sttuu|xyz) with numerical integration
+  ## different part in integrand
   int_diff <- lapply(list_nodes, crossprod)
-  # Numerator
+  ## Numerator
   S_ttuu_nu <- lapply(1:N, function(e) Reduce("+", Map("*", int_diff, list_com_sub[[e]])))
   S_ttuu <- Map("/", S_ttuu_nu, dnmt)
-  
-  # # 2r x 2r, Average across N samples
+  # 2r x 2r, Average across N samples
   # S_ttuu <- Reduce("+", S_ttuu)/N
-  
   # Stt <- S_ttuu[1:r,1:r,drop=FALSE]
   # Suu <- S_ttuu[r+1:r,r+1:r,drop=FALSE]
   # Stu <- S_ttuu[1:r,r+1:r,drop=FALSE]
   # Chh <- Suu - t(Stu)%*%B - t(B)%*%Stu + t(B)%*%Stt%*%B
-  #################################################
+
   # adjust (t,u) to (t,h)
   list_nodes_th <- lapply(list_nodes, function(e) {
     e[,r+1:r] <- e[,r+1:r] - e[,1:r]%*% B
@@ -892,11 +884,11 @@ E_step_bi <- function(X, Y, Z, params, level = level, Nr.core=1){
     Q_ab_new <- GH_Q_ab(beta + s*grd_ab,list_nodes_th,Z,list_com_sub,dnmt)
   }
   
-  #################################################
-  ## log likelihood
+  # log likelihood
   logl <- list_lik_log %>% unlist %>% sum
   # print(list_lik %>% unlist %>% log)
-  #################################################
+
+  # output
   list(
     mu_T = mu_TU[,1:r,drop=F],
     mu_U = mu_TU[,r+1:r,drop=F],
@@ -913,6 +905,7 @@ E_step_bi <- function(X, Y, Z, params, level = level, Nr.core=1){
 
 ## function for numerical integration of Q_ab
 GH_Q_ab <- function(beta, l_n=list_nodes_th,Z.=Z,l_com=list_com_sub,de=dnmt){
+  N = length(Z.)
   # log probability of z=1 and z=0
   z1 <- lapply(l_n, function(e){
     a_tmp <- as.numeric(-(cbind(1,e) %*% t(beta)))
@@ -945,6 +938,7 @@ GH_Q_ab <- function(beta, l_n=list_nodes_th,Z.=Z,l_com=list_com_sub,de=dnmt){
 
 ## function for numerical integration of gradient of Q_ab
 GH_grd_ab <- function(beta, l_n=list_nodes_th,Z.=Z,l_com=list_com_sub,de=dnmt){
+  N = length(Z.)
   # Q'_ab
   z1 <- lapply(l_n, function(e){
     a_tmp <- as.numeric(-(cbind(1,e) %*% t(beta)))
@@ -1240,8 +1234,8 @@ Su_PO2PLS_bi <- function(X, Y, Z, r, rx, ry, steps = 1e5, tol = 1e-6, level=leve
   # params$SigH <- params$SigH[ordSB,ordSB, drop=FALSE]
   
   # # R-square Z fit 
-  pre_z <- with(params, a0 + X%*%W%*%(t(a)-B%*%t(b)) + Y%*%C%*%t(b))
-  z_p <- 1/(1+exp(-pre_z))
+  mu_z <- with(params, a0 + X%*%W%*%(t(a)-B%*%t(b)) + Y%*%C%*%t(b))
+  z_p <- 1/(1+exp(-mu_z))
   pre_z <- ifelse(z_p > 0.5, 1,0)
   levs <- c(0,1)
   zfit <- table(factor(pre_z, levs), factor(Z, levs))
@@ -1253,7 +1247,7 @@ Su_PO2PLS_bi <- function(X, Y, Z, r, rx, ry, steps = 1e5, tol = 1e-6, level=leve
           "; Last increment: ", signif(logl[i+1]-logl[i],4))
   message("Log-likelihood: ", logl[i+1])
   message("Accuracy of z fit: ", acc)
-  outputt <- list(params = params, logl = logl[0:i+1][-1], zfit = zfit, acc=acc) #, debug = debug_list)
+  outputt <- list(params = params, logl = logl[0:i+1][-1], mu_z=mu_z, zfit = zfit, acc=acc) #, debug = debug_list)
   class(outputt) <- "PO2PLS"
   return(outputt)
 }

@@ -108,6 +108,8 @@ GH_Intl <- function(func, div_mrg=F, dim=2*r, level=6, x,y,z, params, plot_nodes
 # f(z|tu) * f(x|t) * f(y|u)
 fun_com <- function(i, x,y,z,params){
   r <- ncol(params$SigT)
+  p <- nrow(params$W)
+  q <- nrow(params$C)
   alpha <- with(params, cbind(a0,a-b%*%B,b))
   z_tu <- with(params, 
                if(z==1){
@@ -192,6 +194,7 @@ fun_com <- function(i, x,y,z,params){
   ## test likelihood without z
   # return(x_t*y_u*i$w)
   
+  # browser()
   # return(z_tu*x_t*y_u*i$w)
   return(log(z_tu) + l_xt + l_yu + log(i$w))
 }
