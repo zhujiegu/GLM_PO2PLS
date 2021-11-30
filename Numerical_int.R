@@ -1,3 +1,7 @@
+list.of.packages <- c("fastGHQuad")
+new.packages <- list.of.packages[!(list.of.packages %in% installed.packages()[,"Package"])]
+if(length(new.packages)) install.packages(new.packages)
+
 GH_com <- function(Nr.cores=1, level=6, X,Y,Z, params, plot_nodes=F){
   dim = 2*ncol(params$B)
   N = nrow(X)

@@ -11,12 +11,14 @@ blockm<-function(A,B,C)
 }
 
 #' @export
-generate_params_su <- function(X, Y, Z, r, rx, ry, alpha_x = 0.1, alpha_y = 0.1, alpha_z = 0.1,
+#' Provide XYZ if "o2m". Provide p,q if "random" or "specify"
+#' Note in "specify", set.seed is used
+generate_params_su <- function(X=NULL, Y=NULL, Z=NULL, p=NULL, q=NULL, r, rx, ry, alpha_x = 0.1, alpha_y = 0.1, alpha_z = 0.1,
                                alpha_tu = 0.1, B=1, a=t(2),b=t(1), type=c('o2m','random','specify')){
   type=match.arg(type)
-  p = ifelse(is.matrix(X) | type != "random", ncol(X), X)
-  q = ifelse(is.matrix(Y) | type != "random", ncol(Y), Y)
   if(type=="o2m"){
+    p = ncol(X)
+    q = ncol(Y)
     fit <- o2m(X, Y, r, rx, ry, stripped=TRUE)
     return(with(fit, {
       x_tp <- cbind(Tt,U)
@@ -64,6 +66,7 @@ generate_params_su <- function(X, Y, Z, r, rx, ry, alpha_x = 0.1, alpha_y = 0.1,
     }))
   }
   if(type=="specify"){
+    set.seed(0)
     outp <- list(
       W = orth(matrix(rnorm(p*r), p, r)+1),
       Wo = suppressWarnings(sign(rx)*orth(matrix(rnorm(p*max(1,rx)), p, max(1,rx))+seq(-p/2,p/2,length.out = p))),
@@ -665,12 +668,12 @@ sd_ab <- function(fit, X, Y, Z, b_on_h = T){
 }
 
 #' @export
-generate_params_bi <- function(X, Y, Z, r, rx, ry, alpha_x = 0.1, alpha_y = 0.1, alpha_tu = 0.1, 
+generate_params_bi <- function(X=NULL, Y=NULL, Z=NULL, p=NULL, q=NULL, r, rx, ry, alpha_x = 0.1, alpha_y = 0.1, alpha_tu = 0.1, 
                                B=1, a0=0,a=t(2),b=t(1), type=c('o2m','random','specify')){
   type=match.arg(type)
-  p = ifelse(is.matrix(X) | type != "random", ncol(X), X)
-  q = ifelse(is.matrix(Y) | type != "random", ncol(Y), Y)
   if(type=="o2m"){
+    p = ncol(X)
+    q = ncol(Y)
     fit <- o2m(X, Y, r, rx, ry, stripped=TRUE)
     x_tp <- with(fit, cbind(Tt,U-Tt))
     ab <- as.vector(glm(as.factor(Z)~x_tp, family = 'binomial')$coef)
@@ -719,6 +722,7 @@ generate_params_bi <- function(X, Y, Z, r, rx, ry, alpha_x = 0.1, alpha_y = 0.1,
   }
   
   if(type=="specify"){
+    set.seed(0)
     outp <- list(
       W = orth(matrix(rnorm(p*r), p, r)+1),
       Wo = suppressWarnings(sign(rx)*orth(matrix(rnorm(p*max(1,rx)), p, max(1,rx))+seq(-p/2,p/2,length.out = p))),
