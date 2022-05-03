@@ -182,6 +182,7 @@ E_step_su <- function(X, Y, Z, params, b_on_h=F){
   a = params$a
   b = params$b
   sig2G = params$sig2G
+  
   ## define dimensions
   N = nrow(X)
   p = nrow(W)
@@ -485,7 +486,7 @@ Su_PO2PLS <- function(X, Y, Z, r, rx, ry, steps = 1e5, tol = 1e-6, init_param= c
     init_param <- match.arg(init_param)
     if(r+max(rx,ry) <= min(ncol(X),ncol(Y)) && init_param == "o2m")
     {
-      params <- generate_params_su(X, Y, Z, r, rx, ry, type = "o2m")
+      params <- generate_params_su(X, Y, Z, NULL,NULL, r, rx, ry, type = "o2m")
     }
     else
     {
@@ -494,7 +495,7 @@ Su_PO2PLS <- function(X, Y, Z, r, rx, ry, steps = 1e5, tol = 1e-6, init_param= c
         cat("** NOTE: Too many components for init_param='o2m', switched to init_param='unit'**.\n\n");
         init_param = "unit"
       }
-      params <- generate_params_su(X, Y, Z, r, rx, ry, type = init_param)
+      params <- generate_params_su(X, Y, Z, NULL,NULL, r, rx, ry, type = init_param)
     }
   }
   
@@ -581,7 +582,7 @@ Su_PO2PLS <- function(X, Y, Z, r, rx, ry, steps = 1e5, tol = 1e-6, init_param= c
   return(outputt)
 }
 
-sd_B <- function(fit, X, Y){
+sd_B <- function(fit, X, Y, Z){
   # tmp.Estep <- E_step(X, Y, fit$par)
   # with(tmp.Estep,
   #      Stt%*%solve(fit$par$SigH) -
@@ -592,37 +593,107 @@ sd_B <- function(fit, X, Y){
   tmp.Estep <- E_step_su(X, Y, Z, fit$par)
   with(tmp.Estep,
        solve(fit$par$SigH)%*%Stt - solve(fit$par$SigH)%*%
-         (Sut%*%t(Sut) - Sut%*%Stt%*%fit$par$B - t(Sut%*%Stt%*%fit$par$B)
+         (t(Stu)%*%Stu - t(Stu)%*%Stt%*%fit$par$B - t(t(Stu)%*%Stt%*%fit$par$B)
           + fit$par$B%*%crossprod(Stt)%*%fit$par$B) %*%solve(fit$par$SigH)) %>%
     multiply_by(nrow(X)) %>% solve %>% diag %>% abs %>% raise_to_power(0.5)
 }
 
-sd_ab <- function(fit, X, Y, Z, b_on_h = T){
-  if(!b_on_h) stop("please set b_on_h to TRUE")
+# sd_ab <- function(fit, X, Y, Z, b_on_h = T){
+#   if(!b_on_h) stop("please set b_on_h to TRUE")
+#   B <- fit$params$B
+#   r = ncol(B)
+#   N = nrow(X)
+#   
+#   tmp.Estep <- E_step_su(X, Y, Z, fit$par, b_on_h = b_on_h)
+# 
+#   tmp.Estep <- within(tmp.Estep,{
+#                     mu_H = mu_U - mu_T %*% B
+#                     Mtt = ET[1:r,1:r,drop=FALSE]
+#                     Muu = ET[(r+1):(2*r), (r+1):(2*r),drop=FALSE]
+#                     Mtu = ET[1:r, (r+1):(2*r),drop=FALSE]
+#                     })
+# 
+#   # (t,h)
+#   mu_TH <- with(tmp.Estep, cbind(mu_T, mu_H))
+#   
+#   Mhh <- with(tmp.Estep, Muu - t(Mtu)%*%B - t(B)%*%Mtu + t(B)%*%Mtt%*%B)
+#   Mth <- with(tmp.Estep, Mtu - Mtt%*%B)
+#   Mtthh <- with(tmp.Estep, rbind(cbind(Mtt, Mth),
+#                  cbind(t(Mth), Mhh)))
+#   
+#   Sth <- with(tmp.Estep, Stu - Stt%*%B)
+#   Stthh <- with(tmp.Estep, rbind(cbind(Stt, Sth),
+#                  cbind(t(Sth), Shh)))
+#   
+#   # ## 
+#   # # test
+#   # Stthh_test <- matrix(0, 2*r, 2*r)
+#   # for (i in 1:N){
+#   #   Stthh_test <- Stthh_test + Mtthh + crossprod(mu_TH[i, , drop=F])
+#   # }
+#   # all.equal(Stthh_test/N, Stthh)
+#   
+#   aabb <- with(fit$params, cbind(a,b))
+#   
+#   chunk_1 <- chunk_2 <- chunk_3 <- chunk_4 <- term_3 <- matrix(0, 2*r, 2*r)
+#   
+#   for(i in 1:N){
+#     mu_TH_i <- mu_TH[i, ,drop=F]
+#     Stthh_i <- Mtthh + crossprod(mu_TH_i)
+#     chunk_1 <- chunk_1 + Z[i,]^2 * Stthh_i
+#     chunk_2 <- chunk_2 + Z[i,]*(t(mu_TH_i)%*%aabb%*%Stthh_i + t(t(mu_TH_i)%*%aabb%*%Stthh_i) +
+#                                   drop(aabb%*%t(mu_TH_i))*(Mtthh - crossprod(mu_TH_i)))
+#     chunk_4 <- chunk_4 + 2*Stthh_i%*%t(aabb)%*%aabb%*%Stthh_i + 
+#       drop(mu_TH_i%*%t(aabb)%*%aabb%*%t(mu_TH_i))*(Mtthh - crossprod(mu_TH_i)) +
+#       sum(diag(crossprod(aabb)%*%Mtthh))*Stthh_i
+#     
+#     # for the third term
+#     if(i!=1){
+#       for(j in 1:(i-1)){
+#         mu_TH_j <- mu_TH[j, ,drop=F]
+#         Stthh_j <- Mtthh + crossprod(mu_TH_j)
+#         Esi <- Z[i,]*t(mu_TH_i) - Stthh_i%*%t(aabb)
+#         Esj <- Z[j,]*t(mu_TH_j) - Stthh_j%*%t(aabb)
+#         term_3 <- term_3 + Esi%*%t(Esj)
+#       }
+#     }
+#   }
+#   chunk_3 <- t(chunk_2)
+#   chunk <- chunk_1 - chunk_2 - chunk_3 + chunk_4
+#   
+#   # (N/fit$par$sig2G * Stthh) %>% solve %>% diag %>% raise_to_power(0.5)
+#   
+#   info_ab = (N/fit$par$sig2G * Stthh) - (1/fit$par$sig2G^2 * chunk) - (1/fit$par$sig2G^2 * (term_3+t(term_3)))
+#   sd_ab <- info_ab %>% solve %>% diag %>% abs %>% raise_to_power(0.5)
+#   return(list(a = sd_ab[1:r], b = sd_ab[r+1:r]))
+# }
+
+# chi-squared test of (a,b)
+chi2_ab <- function(fit, X, Y, Z){
   B <- fit$params$B
   r = ncol(B)
   N = nrow(X)
   
-  tmp.Estep <- E_step_su(X, Y, Z, fit$par, b_on_h = b_on_h)
-
+  tmp.Estep <- E_step_su(X, Y, Z, fit$par, b_on_h = T)
+  
   tmp.Estep <- within(tmp.Estep,{
-                    mu_H = mu_U - mu_T %*% B
-                    Mtt = ET[1:r,1:r,drop=FALSE]
-                    Muu = ET[(r+1):(2*r), (r+1):(2*r),drop=FALSE]
-                    Mtu = ET[1:r, (r+1):(2*r),drop=FALSE]
-                    })
-
+    mu_H = mu_U - mu_T %*% B
+    Mtt = ET[1:r,1:r,drop=FALSE]
+    Muu = ET[(r+1):(2*r), (r+1):(2*r),drop=FALSE]
+    Mtu = ET[1:r, (r+1):(2*r),drop=FALSE]
+  })
+  
   # (t,h)
   mu_TH <- with(tmp.Estep, cbind(mu_T, mu_H))
   
   Mhh <- with(tmp.Estep, Muu - t(Mtu)%*%B - t(B)%*%Mtu + t(B)%*%Mtt%*%B)
   Mth <- with(tmp.Estep, Mtu - Mtt%*%B)
   Mtthh <- with(tmp.Estep, rbind(cbind(Mtt, Mth),
-                 cbind(t(Mth), Mhh)))
+                                 cbind(t(Mth), Mhh)))
   
   Sth <- with(tmp.Estep, Stu - Stt%*%B)
   Stthh <- with(tmp.Estep, rbind(cbind(Stt, Sth),
-                 cbind(t(Sth), Shh)))
+                                 cbind(t(Sth), Shh)))
   
   # ## 
   # # test
@@ -663,8 +734,21 @@ sd_ab <- function(fit, X, Y, Z, b_on_h = T){
   # (N/fit$par$sig2G * Stthh) %>% solve %>% diag %>% raise_to_power(0.5)
   
   info_ab = (N/fit$par$sig2G * Stthh) - (1/fit$par$sig2G^2 * chunk) - (1/fit$par$sig2G^2 * (term_3+t(term_3)))
-  sd_ab <- info_ab %>% solve %>% diag %>% abs %>% raise_to_power(0.5)
-  return(list(a = sd_ab[1:r], b = sd_ab[r+1:r]))
+
+  # test for all components
+  stat = as.numeric(aabb %*% info_ab %*% t(aabb))
+  p_global = pchisq(stat, df=2*r, lower.tail=FALSE)
+  
+  # test for each pair
+  stat_pair = c()
+  
+  for(i in 1:r){
+    stat_pair[i] <- as.numeric(aabb[,c(i,i+r),drop=F] %*% info_ab[c(i,i+r),c(i,i+r),drop=F]
+                               %*% t(aabb[,c(i,i+r),drop=F]))
+  }
+  p_pair = pchisq(stat_pair, df=2, lower.tail=FALSE)
+
+  return(list(p_global=p_global, p_pair=p_pair))
 }
 
 #' @export
@@ -903,7 +987,8 @@ E_step_bi <- function(X, Y, Z, params, level = level, Nr.core=1){
     # Shh = Chh,
     s = s,
     grd_ab = grd_ab,
-    logl = logl
+    logl = logl,
+    GH_common=common
   )
 }
 
@@ -1037,6 +1122,9 @@ M_step_bi <- function(E_fit, params, X, Y, Z, orth_type = c("SVD","QR")){
     params$sig2E = mean(tmp_sig2E)
     params$sig2F = mean(tmp_sig2F)
     
+    # if(params$sig2E < 0) params$sig2E = 1e-5
+    # if(params$sig2F < 0) params$sig2F = 1e-5
+    
     params$B = t(Stu) %*% MASS::ginv(Stt) * diag(1,r)
     params$SigT = Stt*diag(1,r)
     params$SigU = Suu*diag(1,r)
@@ -1152,7 +1240,7 @@ Su_PO2PLS_bi <- function(X, Y, Z, r, rx, ry, steps = 1e5, tol = 1e-6, level=leve
     init_param <- match.arg(init_param)
     if(r+max(rx,ry) <= min(ncol(X),ncol(Y)) && init_param == "o2m")
     {
-      params <- generate_params_bi(X, Y, Z, r, rx, ry, type = "o2m")
+      params <- generate_params_bi(X, Y, Z, NULL, NULL, r, rx, ry, type = "o2m")
     }
     else
     {
@@ -1161,7 +1249,7 @@ Su_PO2PLS_bi <- function(X, Y, Z, r, rx, ry, steps = 1e5, tol = 1e-6, level=leve
         cat("** NOTE: Too many components for init_param='o2m', switched to init_param='unit'**.\n\n");
         init_param = "unit"
       }
-      params <- generate_params_bi(X, Y, Z, r, rx, ry, type = init_param)
+      params <- generate_params_bi(X, Y, Z, NULL, NULL, r, rx, ry, type = init_param)
     }
   }
   
@@ -1246,12 +1334,352 @@ Su_PO2PLS_bi <- function(X, Y, Z, r, rx, ry, steps = 1e5, tol = 1e-6, level=leve
   acc <- caret::confusionMatrix(zfit)$overall['Accuracy']
   
   message("Nr steps was ", i)
-  message("Negative increments: ", any(diff(logl[1:i+1]) < 0), "\n",
-          "Smallest increments: ", min(diff(logl[1:i+1])),
-          "; Last increment: ", signif(logl[i+1]-logl[i],4))
   message("Log-likelihood: ", logl[i+1])
   message("Accuracy of z fit: ", acc)
-  outputt <- list(params = params, logl = logl[0:i+1][-1], mu_z=mu_z, zfit = zfit, acc=acc) #, debug = debug_list)
+  outputt <- list(params = params, logl = logl[0:i+1][-1], mu_z=mu_z, zfit = zfit, acc=acc, GH_com=E_next$GH_common,level=level) #, debug = debug_list)
   class(outputt) <- "PO2PLS"
   return(outputt)
+}
+
+# chi-squared test of (a0,a,b) for binary
+chi2_ab_bi <- function(fit, X, Y, Z, level=NULL, Nr.core=NULL){
+  B <- fit$params$B
+  r = ncol(B)
+  N = nrow(X)
+  
+  # tmp.Estep <- E_step_bi(X, Y, Z, fit$par, level = level, Nr.core = Nr.core)
+  # GH_com <- tmp.Estep$GH_common
+  GH_com <- fit$GH_com
+  
+  list_com_log <- GH_com$list_com_log # values of common parts (list(length N) of list (dim^Q))
+  list_nodes <- GH_com$nodes
+  # divide both numerator and denominator by exp(max), to avoid "Inf"
+  list_com_sub <- lapply(list_com_log, function(e){
+    e <- unlist(e)
+    max_e <- max(e)
+    as.list(exp(e-max_e))
+  }
+  )
+  
+  # likelihood of each sample
+  list_lik_log <- lapply(list_com_log, function(e){
+    e <- unlist(e)
+    max_e <- max(e)
+    return(max_e + log(sum(exp(e-max_e))))
+  })
+  
+  # Denominator = f(x,y,z)/exp(max)
+  dnmt <- lapply(1:N, function(e) Reduce("+", list_com_sub[[e]]))
+  
+  # adjust (t,u) to (t,h)
+  list_nodes_th <- lapply(list_nodes, function(e) {
+    e[,r+1:r] <- e[,r+1:r] - e[,1:r]%*% B
+    return(e)
+  })
+  beta <- with(fit$params, cbind(a0,a,b))
+  aabb <- with(fit$params, cbind(a,b))
+  
+  S_ab <- GH_I_ab(beta,list_nodes_th,Z,list_com_sub,dnmt,'S')
+  S2_ab <- GH_I_ab(beta,list_nodes_th,Z,list_com_sub,dnmt,'S2')
+  B_ab <- GH_I_ab(beta,list_nodes_th,Z,list_com_sub,dnmt,'B')
+
+  SiSj <- matrix(0, 1+2*r, 1+2*r)
+  for(i in 2:N){
+    for(j in 1:(i-1)){
+      SiSj <- SiSj + S_ab[[i]]%*%t(S_ab[[j]])
+    }
+  }
+  info_ab = (Reduce('+', B_ab) - Reduce('+', S2_ab) - SiSj - t(SiSj))[-1,-1]
+  
+  # test for all components
+  stat = as.numeric(aabb %*% info_ab %*% t(aabb))
+  if(stat<0) stop('Negative Chi-square statistic, try to set the level higher')
+  p_global = pchisq(stat, df=2*r, lower.tail=FALSE)
+  
+  # test for each pair
+  stat_pair = c()
+  
+  for(i in 1:r){
+    stat_pair[i] <- as.numeric(aabb[,c(i,i+r),drop=F] %*% info_ab[c(i,i+r),c(i,i+r),drop=F]
+                               %*% t(aabb[,c(i,i+r),drop=F]))
+    if(stat_pair[i]<0) stop('Negative Chi-square statistic, try to set the level higher')
+  }
+  p_pair = pchisq(stat_pair, df=2, lower.tail=FALSE)
+  
+  return(list(p_global=p_global, p_pair=p_pair))
+}
+
+## function for numerical integration of E[S(ab)|xyz], E[B(ab)|xyz], E[S(ab)S(ab)'|xyz]
+GH_I_ab <- function(beta, l_n=list_nodes_th,Z.=Z,l_com=list_com_sub,de=dnmt,term){
+  N = length(Z.)
+  
+  if(term=="S"){  # Q'_ab
+    z1 <- lapply(l_n, function(e){
+      a_tmp <- as.numeric(-(cbind(1,e) %*% t(beta)))
+      m <- max(0, a_tmp)
+      exp(a_tmp-m)/(exp(-m) + exp(a_tmp-m)) * t(cbind(1,e))
+    })
+    z0 <- lapply(l_n, function(e){
+      a_tmp <- as.numeric(cbind(1,e) %*% t(beta))
+      m <- max(0, a_tmp)
+      - exp(a_tmp-m)/(exp(-m) + exp(a_tmp-m)) * t(cbind(1,e))
+    })
+  }
+  
+  if(term=="B"){
+    z1 <- lapply(l_n, function(e){
+      a_tmp <- as.numeric(-(cbind(1,e) %*% t(beta)))
+      m <- max(0, a_tmp)
+      exp(a_tmp-m)/(exp(-m) + 2*exp(a_tmp-m) + exp(2*a_tmp-m)) * (t(cbind(1,e))%*%cbind(1,e))
+    })
+    z0 <- lapply(l_n, function(e){
+      a_tmp <- as.numeric(cbind(1,e) %*% t(beta))
+      m <- max(0, a_tmp)
+      exp(a_tmp-m)/(exp(-m) + 2*exp(a_tmp-m) + exp(2*a_tmp-m)) * (t(cbind(1,e))%*%cbind(1,e))
+    })
+  }
+  
+  if(term=="S2"){
+    z1 <- lapply(l_n, function(e){
+      a_tmp <- as.numeric(-(cbind(1,e) %*% t(beta)))
+      m <- max(0, a_tmp)
+      (exp(a_tmp-m)/(exp(-m) + exp(a_tmp-m)))^2 * (t(cbind(1,e))%*%cbind(1,e))
+    })
+    z0 <- lapply(l_n, function(e){
+      a_tmp <- as.numeric(cbind(1,e) %*% t(beta))
+      m <- max(0, a_tmp)
+      (exp(a_tmp-m)/(exp(-m) + exp(a_tmp-m)))^2 * (t(cbind(1,e))%*%cbind(1,e))
+    })
+  }
+  
+  # different part in integrand
+  int_diff_z <- lapply(Z., function(z){
+    if(z){
+      return(z1)
+    }else{
+      return(z0)
+    }
+  })
+  # combine common parts
+  int_ab <- lapply(1:N, function(e) Reduce("+", Map("*", int_diff_z[[e]], l_com[[e]])))
+  # grd_ab <- rapply(grd_ab, f=function(x) ifelse(is.nan(x),0,x), how="replace")
+  int_ab <- Map("/", int_ab, de)
+  return(int_ab)
+}
+
+
+# common parts in GH
+GH_com <- function(Nr.cores=1, level=6, X,Y,Z, params, plot_nodes=F){
+  dim = 2*ncol(params$B)
+  N = nrow(X)
+  # standard GH rule
+  rule <- fastGHQuad::gaussHermiteData(level)
+  
+  # expand grid
+  nodes <- as.matrix(expand.grid(lapply(apply(replicate(dim, rule$x), 
+                                              2, list), unlist)))
+  g <- as.matrix(expand.grid(lapply(apply(replicate(dim, rule$w), 
+                                          2, list), unlist)))
+  w <- apply(g, 1, prod)
+  
+  # adjust for mu and sigma
+  mu <- rep(0,dim)
+  sigma <- with(params, rbind(cbind(SigT, SigT%*%B),
+                              cbind(B%*%SigT, SigT%*%B^2 + SigH)))
+  nodes <- mu + t(sqrt(2)*t(chol(sigma))%*%t(nodes))
+  w <- (1/sqrt(pi))^dim * w
+  
+  # visulize the nodes
+  if(plot_nodes){
+    plot(nodes, cex=-5/log(w), pch=19,
+         xlab=expression(x[1]),
+         ylab=expression(x[2]))
+  }
+  
+  # make list
+  n_w <- lapply(seq_len(nrow(nodes)), function(i) list(n = nodes[i, ,drop=F], w = w[i]))
+  
+  list_com_log <- parallel::mclapply(1:N, mc.cores = Nr.cores, function(e){
+    lapply(n_w, fun_com, x=X[e,],y=Y[e,],z=Z[e], params=params)
+  })
+  # browser()
+  
+  # lapply(n_w, fun_com, x=x[e,],y=y[e,],z=z[e], params=params)
+  
+  nodes <- lapply(seq_len(nrow(nodes)), function(i) nodes[i, ,drop=F])
+  return(list(list_com_log=list_com_log, nodes=nodes))
+}
+
+
+
+# 
+# # func is the g(eta) in form int(g(eta)f(z|eta)f(x,y|eta)f(eta)d(eta))
+# # set div_mrg to TRUE when divided by f(x,y,z)
+# GH_Intl <- function(func, div_mrg=F, dim=2*r, level=6, x,y,z, params, plot_nodes=F){
+#   # standard GH rule
+#   rule <- fastGHQuad::gaussHermiteData(level)
+#   
+#   # expand grid
+#   nodes <- as.matrix(expand.grid(lapply(apply(replicate(dim, rule$x), 
+#                                               2, list), unlist)))
+#   g <- as.matrix(expand.grid(lapply(apply(replicate(dim, rule$w), 
+#                                           2, list), unlist)))
+#   w <- apply(g, 1, prod)
+#   
+#   # adjust for mu and sigma
+#   mu <- rep(0,dim)
+#   sigma <- with(params, rbind(cbind(SigT, SigT%*%B),
+#                               cbind(B%*%SigT, SigT%*%B^2 + SigH)))
+#   nodes <- mu + t(sqrt(2)*t(chol(sigma))%*%t(nodes))
+#   w <- (1/sqrt(pi))^dim * w
+#   
+#   # visulize the nodes
+#   if(plot_nodes){
+#     plot(nodes, cex=-5/log(w), pch=19,
+#          xlab=expression(x[1]),
+#          ylab=expression(x[2]))
+#   }
+#   ## plot check with mvQuad package
+#   # myRule_GH <- function(l){
+#   #   rule <- fastGHQuad::gaussHermiteData(level)
+#   #   n <- rule$x
+#   #   w <- rule$w
+#   #   initial.domain <- matrix(c(-Inf, Inf), ncol=2)
+#   #   return(list(n=as.matrix(n), w=as.matrix(w), features=list(initial.domain=initial.domain)))
+#   # }
+#   # print(1)
+#   # nw_myGH <- mvQuad::createNIGrid(d=2, type = "myRule_GH", level = 20)
+#   # mvQuad::rescale(nw_myGH, m = rep(0,2*r), C = sigma, dec.type = 2)
+#   # plot(nw_myGH)
+#   
+#   # make list
+#   n_w <- lapply(seq_len(nrow(nodes)), function(i) list(n = nodes[i, ,drop=F], w = w[i]))
+#   
+#   # the different part in the integral (g(eta))
+#   l_part1 <- lapply(n_w, func, x=x,y=y,z=z, params=params)
+#   
+#   # the common part in the integral
+#   l_part2 <- lapply(n_w, fun_com, x=x,y=y,z=z, params=params)
+#   
+#   # combine the two parts
+#   l_result <- Map("*", l_part1, l_part2)
+#   
+#   if(div_mrg){
+#     mrg <- Reduce("+", l_part2)
+#     result <- Reduce("+", l_result)/mrg
+#   }else{
+#     result <- Reduce("+", l_result)
+#   }
+#   return(result)
+# }
+
+
+#################
+# common part of every integral
+# f(z|tu) * f(x|t) * f(y|u)
+fun_com <- function(i, x,y,z,params){
+  r <- ncol(params$SigT)
+  p <- nrow(params$W)
+  q <- nrow(params$C)
+  alpha <- with(params, cbind(a0,a-b%*%B,b))
+  z_tu <- with(params, 
+               if(z==1){
+                 1/(1+exp(-(cbind(1,i$n) %*% t(alpha))))
+               }else{
+                 1/(1+exp((cbind(1,i$n) %*% t(alpha))))
+               }
+  ) %>% as.numeric()
+  
+  # Sig_xt <- with(params, Wo %*% SigTo %*% t(Wo) + diag(sig2E,p))
+  rx <- ncol(params$Wo)
+  # Sig_xt_inv <- with(params, 1/sig2E*(diag(p) - 1/sig2E*Wo%*%MASS::ginv(MASS::ginv(SigTo)+1/sig2E*diag(rx))%*%t(Wo)))
+  # Sig_xt_det <- with(params, det(diag(rx)+1/sig2E*SigTo)*(sig2E^p))
+  # x_t_old <- with(params,
+  #             (2*pi)^(-0.5*p) * Sig_xt_det^(-0.5) *
+  #               exp(-0.5*(x-i$n[,1:r]%*%t(W))%*%MASS::ginv(Sig_xt)%*%t((x-i$n[,1:r]%*%t(W))))
+  # ) %>% as.numeric()
+  
+  # x_t_old <- with(params,
+  #             (2*pi)^(-0.5*p) * Sig_xt_det^(-0.5) *
+  #               exp(-0.5/sig2E*(
+  #                 (x-i$n[,1:r]%*%t(W))%*%t(x-i$n[,1:r]%*%t(W)) -
+  #                   1/sig2E*(
+  #                     (x-i$n[,1:r]%*%t(W))%*%Wo%*%MASS::ginv(MASS::ginv(SigTo)+1/sig2E*diag(rx))%*%
+  #                       (t(Wo)%*%t(x-i$n[,1:r]%*%t(W)))
+  #                   )
+  #                 ))) %>% as.numeric()
+  # print(all.equal(x_t_old,x_t))
+  Sig_xt_det_log <- with(params, log(det(diag(rx)+1/sig2E*SigTo)) + p*log(sig2E))
+  
+  # log(f(x|t))
+  l_xt <- with(params, -0.5*(
+    p*log(2*pi) + Sig_xt_det_log + 1/sig2E*(
+      (x-i$n[,1:r]%*%t(W))%*%t(x-i$n[,1:r]%*%t(W)) -
+        1/sig2E*(
+          (x-i$n[,1:r]%*%t(W))%*%Wo%*%MASS::ginv(MASS::ginv(SigTo)+1/sig2E*diag(rx))%*%
+            (t(Wo)%*%t(x-i$n[,1:r]%*%t(W)))
+        )))) %>% as.numeric()
+  
+  # # without orthogonal part
+  # x_t_noot <- with(params, exp(-0.5*(
+  #   p*log(2*pi) + p*log(sig2E) +
+  #     1/sig2E*((x-i$n[,1:r]%*%t(W))%*%t(x-i$n[,1:r]%*%t(W)))))) %>% as.numeric()
+  
+  # if(!all.equal(x_t,x_t_old)) stop("x_t wrong")
+  # browser()
+  # if(x_t==Inf) browser()
+  
+  ry <- ncol(params$Co)
+  # Sig_yu <- with(params, Co %*% SigUo %*% t(Co) + diag(sig2F,q))
+  # Sig_yu_inv <- with(params, 1/sig2F*(diag(q) - 1/sig2F*Co%*%MASS::ginv(MASS::ginv(SigUo)+1/sig2F*diag(ry))%*%t(Co)))
+  # Sig_yu_det <- with(params, det(diag(ry)+1/sig2F*SigUo)*(sig2F^q))
+  # y_u <- with(params,
+  #             (2*pi)^(-0.5*q) * Sig_yu_det^(-0.5) *
+  #               exp(-0.5*(y-i$n[,r+1:r]%*%t(C))%*%MASS::ginv(Sig_yu)%*%t((y-i$n[,r+1:r]%*%t(C))))
+  # ) %>% as.numeric()
+  
+  # y_u <- with(params,
+  #             (2*pi)^(-0.5*q) * Sig_yu_det^(-0.5) *
+  #               exp(-0.5/sig2F*(
+  #                 (y-i$n[,r+1:r]%*%t(C))%*%t(y-i$n[,r+1:r]%*%t(C)) -
+  #                   1/sig2F*(
+  #                     (y-i$n[,r+1:r]%*%t(C))%*%Co%*%MASS::ginv(MASS::ginv(SigUo)+1/sig2F*diag(ry))%*%
+  #                       (t(Co)%*%t(y-i$n[,r+1:r]%*%t(C)))
+  #                   )
+  #                 ))) %>% as.numeric()
+  
+  Sig_yu_det_log <- with(params, log(det(diag(ry)+1/sig2F*SigUo)) + q*log(sig2F))
+  
+  # log(f(y|u))
+  l_yu <- with(params, -0.5*(
+    q*log(2*pi) + Sig_yu_det_log + 1/sig2F*(
+      (y-i$n[,r+1:r]%*%t(C))%*%t(y-i$n[,r+1:r]%*%t(C)) -
+        1/sig2F*(
+          (y-i$n[,r+1:r]%*%t(C))%*%Co%*%MASS::ginv(MASS::ginv(SigUo)+1/sig2F*diag(ry))%*%
+            (t(Co)%*%t(y-i$n[,r+1:r]%*%t(C)))
+        )))) %>% as.numeric()
+  
+  # print(all.equal(y_u_old,y_u))
+  # browser()
+  # print(c(z_tu, x_t, y_u, i$w))
+  ## test likelihood without z
+  # return(x_t*y_u*i$w)
+  
+  # browser()
+  # return(z_tu*x_t*y_u*i$w)
+  return(log(z_tu) + l_xt + l_yu + log(i$w))
+}
+
+# A wrapper
+glm_PO2PLS <- function(X, Y, Z, r, rx, ry, family=c('Gaussian','binomial'), steps = 1e5, tol = 1e-6, level=level, Nr.core =1, 
+                       init_param= c('random','o2m'), orth_type = "SVD", random_restart = FALSE){
+  family <- match.arg(family)
+  if(family == 'Gaussian'){
+    return(Su_PO2PLS(X, Y, Z, r, rx, ry, steps = steps, tol = tol, init_param= init_param,
+                          orth_type = orth_type, random_restart = random_restart, b_on_h=T))
+  }
+  if(family == 'binomial'){
+    return(Su_PO2PLS_bi(X, Y, Z, r, rx, ry, steps = steps, tol = tol, level=level, Nr.core =Nr.core, 
+                        init_param= init_param, orth_type = orth_type, random_restart = random_restart))
+  }
 }
