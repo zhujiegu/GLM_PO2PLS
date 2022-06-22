@@ -418,11 +418,11 @@ M_step_su <- function(E_fit, params, X, Y, Z, orth_type = c("SVD","QR")){
     # params$sig2G = 0
     # params$sig2G = params$sig2G
 
-    params$W = orth(t(t(mu_T)%*%(X/N)) - params$Wo%*%t(Stto),type = orth_type)#%*%MASS::ginv(Stt)
-    params$C = orth(t(t(mu_U)%*%(Y/N)) - params$Co%*%t(Suuo),type = orth_type)#%*%MASS::ginv(Suu)
+    params$W = orth(t(X/N) %*% mu_T - params$Wo%*%t(Stto),type = orth_type)#%*%MASS::ginv(Stt)
+    params$C = orth(t(Y/N) %*% mu_U - params$Co%*%t(Suuo),type = orth_type)#%*%MASS::ginv(Suu)
 
-    params$Wo = suppressWarnings(orth_x*orth(t(t(mu_To)%*%(X/N)) - params$W%*%Stto,type = orth_type))#%*%MASS::ginv(Stoto)
-    params$Co = suppressWarnings(orth_y*orth(t(t(mu_Uo)%*%(Y/N)) - params$C%*%Suuo,type = orth_type))#%*%MASS::ginv(Suouo)
+    params$Wo = suppressWarnings(orth_x*orth(t(X/N) %*% mu_To - params$W%*%Stto,type = orth_type))#%*%MASS::ginv(Stoto)
+    params$Co = suppressWarnings(orth_y*orth(t(Y/N) %*% mu_Uo - params$C%*%Suuo,type = orth_type))#%*%MASS::ginv(Suouo)
     
     # params$a = (t(Z/N)%*%mu_T - params$b%*%Stu) %*% MASS::ginv(Stt*diag(1,r))
     # params$b = (t(Z/N)%*%mu_U - params$a%*%t(Stu)) %*% MASS::ginv(Suu*diag(1,r))
@@ -1133,8 +1133,8 @@ M_step_bi <- function(E_fit, params, X, Y, Z, orth_type = c("SVD","QR")){
     params$a = params$a + s*grd_ab[,1+1:r]
     params$b = params$b + s*grd_ab[,1+r+1:r]
     
-    params$W = orth(t(t(mu_T)%*%(X/N)) %*% MASS::ginv(Stt),type = orth_type)
-    params$C = orth(t(t(mu_U)%*%(Y/N)) %*% MASS::ginv(Suu),type = orth_type)#
+    params$W = orth(t(X/N) %*% mu_T %*% MASS::ginv(Stt),type = orth_type)
+    params$C = orth(t(Y/N) %*% mu_U %*% MASS::ginv(Suu),type = orth_type)#
     
     # params$sig2E = 1/p * abs(sum(diag(X%*%t(X)))/N - 2*sum(diag(mu_T%*%t(params$W)%*%t(X)))/N +
     #                        sum(diag(params$SigT)) - sum(diag(params$SigTo)))
