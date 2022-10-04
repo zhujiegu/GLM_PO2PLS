@@ -481,7 +481,13 @@ Su_PO2PLS <- function(X, Y, Z, r, rx, ry, steps = 1e5, tol = 1e-6, init_param= c
   # z_inf <- c()
   if(all(c("W","Wo","C","Co","B","SigT","SigTo","SigUo","SigH","sig2E","sig2F","a","b","sig2G") %in% names(init_param))){
     message('using old fit \n')
-    params <- init_param}
+    params <- init_param
+    } 
+  else if(all(c("W","Wo","C","Co","B","SigT","SigTo","SigUo","SigH","sig2E","sig2F","a","b","a0") %in% names(init_param))){
+    message('using old fit from binary model \n')
+    init_param$sig2G <- 1
+    params <- init_param[names(init_param)!='a0']
+    }
   else {
     init_param <- match.arg(init_param)
     if(r+max(rx,ry) <= min(ncol(X),ncol(Y)) && init_param == "o2m")
@@ -552,6 +558,11 @@ Su_PO2PLS <- function(X, Y, Z, r, rx, ry, steps = 1e5, tol = 1e-6, init_param= c
     params <- jitter_params(params)
     params[-(1:4)] <- generate_params_su(X, Y, r, rx, ry, type = 'r')[-(1:4)]
   }
+  
+  # estimated latent variables
+  E_outp = E_step_su(X, Y, Z, params, b_on_h = b_on_h)
+  latent_var <- E_outp[names(E_outp) %in% c('mu_T', 'mu_U', 'mu_To', 'mu_Uo')]
+  
   # params <- params_max
   signB <- sign(diag(params$B))
   params$B <- params$B %*% diag(signB,r)
@@ -577,7 +588,7 @@ Su_PO2PLS <- function(X, Y, Z, r, rx, ry, steps = 1e5, tol = 1e-6, init_param= c
           "; Last increment: ", signif(logl[i+1]-logl[i],4))
   message("Log-likelihood: ", logl[i+1])
   message("R-square of z fit: ", zfit)
-  outputt <- list(params = params, logl = logl[0:i+1][-1], zfit = zfit) #, debug = debug_list)
+  outputt <- list(params = params, latent_var=latent_var, logl = logl[0:i+1][-1], zfit = zfit) #, debug = debug_list)
   class(outputt) <- "PO2PLS"
   return(outputt)
 }
@@ -758,27 +769,15 @@ generate_params_bi <- function(X=NULL, Y=NULL, Z=NULL, p=NULL, q=NULL, r, rx, ry
   if(type=="o2m"){
     p = ncol(X)
     q = ncol(Y)
-    fit <- o2m(X, Y, r, rx, ry, stripped=TRUE)
-    x_tp <- with(fit, cbind(Tt,U-Tt))
-    ab <- as.vector(glm(as.factor(Z)~x_tp, family = 'binomial')$coef)
-    # print(ab)
-    return(with(fit, {
-      list(
-        W = W.,
-        Wo = suppressWarnings(orth(P_Yosc.)),
-        C = C.,
-        Co = suppressWarnings(orth(P_Xosc.)),
-        B = abs(cov(Tt,U)%*%MASS::ginv(cov(Tt)))*diag(1,r),
-        SigT = cov(Tt)*diag(1,r),
-        SigTo = sign(rx)*cov(T_Yosc)*diag(1,max(1,rx)),
-        SigUo = sign(ry)*cov(U_Xosc)*diag(1,max(1,ry)),
-        SigH = cov(H_UT)*diag(1,r),
-        sig2E = (ssq(X)-ssq(Tt)-ssq(T_Yosc))/prod(dim(X)) + 0.01,
-        sig2F = (ssq(Y)-ssq(U)-ssq(U_Xosc))/prod(dim(Y)) + 0.01,
-        a0 = ab[1],
-        a = t(ab[1+1:r]),
-        b = t(ab[(1+r)+1:r])
-      )}))
+    print('Initializing parameters using GLM-PO2PLS normal model')
+    fit <- suppressMessages(Su_PO2PLS(X, Y, Z, r, rx, ry, steps = 1000, tol = 0.1, init_param='o2m'))
+    print('Parameters initialized')
+  
+    fit <- fit$params[names(fit$params)!='sig2G']
+    # fit$a <- fit$a *0
+    # fit$b <- fit$b *0
+    fit$a0 <- 0
+    return(fit)
   }
   
   if(type=="random"){
@@ -875,10 +874,12 @@ generate_data_bi <- function(N, params, distr = rnorm){
   EF <- cbind(scale(matrix(rnorm(N*p), N))*sqrt(sig2E), 
               scale(matrix(rnorm(N*q), N))*sqrt(sig2F))
   
-  mu_z <- a0 + M[,1:2*r]%*%t(cbind(a-b%*%B,b))
+  mu_z <- a0 + M[,1:(2*r)]%*%t(cbind(a-b%*%B,b))
+  # binomail
   prob_z <- 1/(1+exp(-mu_z))
-  # print(cbind(M[,1:2*r],prob_z))
   Z <- rbinom(N, 1, prob_z)
+  # # probit
+  # Z <- ifelse(mu_z > 0, 1, 0)
   return(list(dat = cbind(M %*% t(Gamma) + EF, Z), trueTU = M[,1:2*r], mu_z = mu_z))
 }
 
@@ -1236,6 +1237,11 @@ Su_PO2PLS_bi <- function(X, Y, Z, r, rx, ry, steps = 1e5, tol = 1e-6, level=leve
   if(all(c("W","Wo","C","Co","B","SigT","SigTo","SigUo","SigH","sig2E","sig2F","a0","a","b") %in% names(init_param))){
     message('using old fit \n')
     params <- init_param}
+  else if(all(c("W","Wo","C","Co","B","SigT","SigTo","SigUo","SigH","sig2E","sig2F","a","b","sig2G") %in% names(init_param))){
+    message('using old fit from Gaussian model \n')
+    init_param$a0 <- 0
+    params <- init_param[names(init_param)!='sig2G']
+  }
   else {
     init_param <- match.arg(init_param)
     if(r+max(rx,ry) <= min(ncol(X),ncol(Y)) && init_param == "o2m")
@@ -1308,6 +1314,10 @@ Su_PO2PLS_bi <- function(X, Y, Z, r, rx, ry, steps = 1e5, tol = 1e-6, level=leve
     params <- jitter_params(params)
     params[-(1:4)] <- generate_params_su(X, Y, r, rx, ry, type = 'r')[-(1:4)]
   }
+  
+  # latent variable values
+  E_outp = E_step_bi(X, Y, Z, params, level=level, Nr.core=Nr.core)
+  latent_var <- E_outp[names(E_outp) %in% c('mu_T', 'mu_U', 'mu_To', 'mu_Uo')]
   # params <- params_max
   # signB <- sign(diag(params$B))
   # params$B <- params$B %*% diag(signB,r)
@@ -1336,7 +1346,8 @@ Su_PO2PLS_bi <- function(X, Y, Z, r, rx, ry, steps = 1e5, tol = 1e-6, level=leve
   message("Nr steps was ", i)
   message("Log-likelihood: ", logl[i+1])
   message("Accuracy of z fit: ", acc)
-  outputt <- list(params = params, logl = logl[0:i+1][-1], mu_z=mu_z, zfit = zfit, acc=acc, GH_com=E_next$GH_common,level=level) #, debug = debug_list)
+  outputt <- list(params = params, latent_var=latent_var, logl = logl[0:i+1][-1], mu_z=mu_z, 
+                  zfit = zfit, acc=acc, GH_com=E_next$GH_common,level=level) #, debug = debug_list)
   class(outputt) <- "PO2PLS"
   return(outputt)
 }
@@ -1671,6 +1682,7 @@ fun_com <- function(i, x,y,z,params){
 }
 
 # A wrapper
+# init_param == 'o2m' for binary uses modified GLM_PO2PLS_Gaussian fit (which uses 'o2m' fit)
 glm_PO2PLS <- function(X, Y, Z, r, rx, ry, family=c('Gaussian','binomial'), steps = 1e5, tol = 1e-6, level=level, Nr.core =1, 
                        init_param= c('random','o2m'), orth_type = "SVD", random_restart = FALSE){
   family <- match.arg(family)
