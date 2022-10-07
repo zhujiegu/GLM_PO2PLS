@@ -1312,7 +1312,7 @@ Su_PO2PLS_bi <- function(X, Y, Z, r, rx, ry, steps = 1e5, tol = 1e-6, level=leve
     }
     i_rr <- i_rr + 1
     params <- jitter_params(params)
-    params[-(1:4)] <- generate_params_su(X, Y, r, rx, ry, type = 'r')[-(1:4)]
+    params[-(1:4)] <- generate_params_bi(X, Y, Z, r, rx, ry, type = 'r')[-(1:4)]
   }
   
   # latent variable values
