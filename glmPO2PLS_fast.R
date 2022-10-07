@@ -201,20 +201,24 @@ E_step_bi_fast <- function(X, Y, Z, params, fixtu, k, level = level, Nr.core=1){
   mu_TU_nu <- lapply(1:N, function(e) Reduce("+", Map("*", int_diff, list_com_sub[[e]])))
   mu_TU <- Map("/", mu_TU_nu, dnmt)
   mu_TU <- mu_TU %>% unlist %>% matrix(nrow=2) %>% t
+  fixtu[,c(k,r+k)] <- mu_TU
+  mu_TU <- fixtu
   
   # E(Sttuu|xyz) with numerical integration
   ## different part in integrand
-  int_diff <- lapply(list_nodes, crossprod)
+  int_diff <- vector(mode = 'list', length = N)
+  for(i in 1:N){
+    int_diff[[i]] <- lapply(list_nodes, function(e){
+      fixtu[i,c(k,r+k)] <- e
+      crossprod(fixtu[i,,drop=F])
+    })
+  }
   ## Numerator
-  S_ttuu_nu <- lapply(1:N, function(e) Reduce("+", Map("*", int_diff, list_com_sub[[e]])))
+  S_ttuu_nu <- lapply(1:N, function(e) Reduce("+", Map("*", int_diff[[e]], list_com_sub[[e]])))
   S_ttuu <- Map("/", S_ttuu_nu, dnmt)
-  # 2r x 2r, Average across N samples
-  # S_ttuu <- Reduce("+", S_ttuu)/N
-  # Stt <- S_ttuu[1:r,1:r,drop=FALSE]
-  # Suu <- S_ttuu[r+1:r,r+1:r,drop=FALSE]
-  # Stu <- S_ttuu[1:r,r+1:r,drop=FALSE]
-  # Chh <- Suu - t(Stu)%*%B - t(B)%*%Stu + t(B)%*%Stt%*%B
   
+  #############################################
+  # start from here
   # adjust (t,u) to (t,h)
   list_nodes_th <- lapply(list_nodes, function(e) {
     e[,r+1:r] <- e[,r+1:r] - e[,1:r]%*% B
