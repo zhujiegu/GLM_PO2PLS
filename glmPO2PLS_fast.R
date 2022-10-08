@@ -105,9 +105,10 @@ Su_PO2PLS_bi_fast <- function(X, Y, Z, r, rx, ry, steps = 1e5, tol = 1e-6, level
       }
       params_max <- params
       for(i in 1:steps){
-        E_next = E_step_bi_fast(x_k, y_k, Z, params, fixtu, k = k, level=level, Nr.core=Nr.core)
-        params_next = M_step_bi(E_next, params, X, Y, Z, orth_type = orth_type)
-        params_next$B <- abs(params_next$B)
+        E_next = E_step_bi_fast( X=x_k, Y=y_k, Z=Z, params=params, fixtu=fixtu, k=k, level=level, 
+                                 Nr.core=Nr.core)
+        params_next = M_step_bi_fast(E_fit=E_next, params=params, X=x_k, Y=y_k, Z=Z, k=k)
+        # params_next$B <- abs(params_next$B)
         
         if(i == 1) logl[1] = E_next$logl
         logl[i+1] = E_next$logl
@@ -119,6 +120,8 @@ Su_PO2PLS_bi_fast <- function(X, Y, Z, r, rx, ry, steps = 1e5, tol = 1e-6, level
         # if(is.na(logl[i+1])) browser()
         # # if(logl[i+1] < logl[i]) browser()
         # if(logl[i+1] >1000) browser()
+        fixtu[,k] <- E_next$mu_T[,k]
+        fixtu[,r+k] <- E_next$mu_U[,k]
         
         if(i > 1 && abs(logl[i+1]-logl[i]) < tol) break
         if(i %in% c(1, 1e1, 1e2, 1e3, 5e3, 1e4, 4e4)) {
@@ -128,13 +131,7 @@ Su_PO2PLS_bi_fast <- function(X, Y, Z, r, rx, ry, steps = 1e5, tol = 1e-6, level
         if(logl[i+1] > max(logl[1:i])) params_max <- params_next
         params = params_next
         
-        # debug_list[[i]] <- list(Cor=cor(cbind(E_next$mu_T,E_next$mu_U)),
-        #                         aa=params_next$a,
-        #                         bb=params_next$b,
-        #                         sig2G=params_next$sig2G,
-        #                         Sttuu=with(E_next, rbind(cbind(2*Stt*diag(1,r), Stu+t(Stu)),
-        #                                        cbind(Stu+t(Stu), 2*Suu*diag(1,r)))),
-        #                         ZTU=t(Z/N)%*%cbind(E_next$mu_T,E_next$mu_U))
+        
       }
       if(!any(diff(logl[-1]) < -1e-10) | !random_restart_original) {
         random_restart = FALSE
@@ -145,6 +142,10 @@ Su_PO2PLS_bi_fast <- function(X, Y, Z, r, rx, ry, steps = 1e5, tol = 1e-6, level
       params[-(1:4)] <- generate_params_bi(X, Y, Z, r, rx, ry, type = 'r')[-(1:4)]
     }
   }
+  
+  outputt <- list(params = params) #, debug = debug_list)
+  class(outputt) <- "PO2PLS"
+  return(outputt)
 }
 
 
@@ -216,27 +217,20 @@ E_step_bi_fast <- function(X, Y, Z, params, fixtu, k, level = level, Nr.core=1){
   ## Numerator
   S_ttuu_nu <- lapply(1:N, function(e) Reduce("+", Map("*", int_diff[[e]], list_com_sub[[e]])))
   S_ttuu <- Map("/", S_ttuu_nu, dnmt)
-  
-  #############################################
-  # start from here
-  # adjust (t,u) to (t,h)
-  list_nodes_th <- lapply(list_nodes, function(e) {
-    e[,r+1:r] <- e[,r+1:r] - e[,1:r]%*% B
-    return(e)
-  })
-  beta <- cbind(a0,a,b)
-  
+
   # Numerical estimation of Q_ab and gradient
-  Q_ab <- GH_Q_ab(beta,list_nodes_th,Z,list_com_sub,dnmt)
-  grd_ab <- GH_grd_ab(beta,list_nodes_th,Z,list_com_sub,dnmt)
+  Q_ab <- GH_Q_ab_fast(cbind(a0,a,b), l_n=list_nodes, Z=Z, params=params, k=k, fixtu=fixtu, l_com=list_com_sub, de=dnmt)
+  grd_ab <- GH_grd_ab_fast(l_n=list_nodes, Z=Z, params=params, k=k, fixtu=fixtu, l_com=list_com_sub, de=dnmt)
   # Backtracking rule to find the step size s
   s = 1
-  Q_ab_new <- GH_Q_ab(beta + s*grd_ab,list_nodes_th,Z,list_com_sub,dnmt)
+  Q_ab_new <- GH_Q_ab_fast((cbind(a0,a,b) + s*grd_ab),l_n=list_nodes, Z=Z, params=params, k=k, 
+                           fixtu=fixtu, l_com=list_com_sub, de=dnmt)
   
   while(Q_ab_new < Q_ab + 0.5*s*tcrossprod(grd_ab)){
     s = 0.8*s
     # print(s)
-    Q_ab_new <- GH_Q_ab(beta + s*grd_ab,list_nodes_th,Z,list_com_sub,dnmt)
+    Q_ab_new <- GH_Q_ab_fast((cbind(a0,a,b) + s*grd_ab),l_n=list_nodes, Z=Z, params=params, k=k, 
+                             fixtu=fixtu, l_com=list_com_sub, de=dnmt)
   }
   
   # log likelihood
@@ -258,6 +252,61 @@ E_step_bi_fast <- function(X, Y, Z, params, fixtu, k, level = level, Nr.core=1){
     GH_common=common
   )
 }
+
+M_step_bi_fast <- function(E_fit, params, X, Y, Z, k){
+  with(E_fit,{
+    
+    N = nrow(X)
+    p = ncol(X)
+    q = ncol(Y)
+    r = ncol(mu_T)
+    rx = ncol(params$Wo)
+    ry = ncol(params$Co)
+    
+    # 2r x 2r, Average across N samples
+    S_ttuu_avgN <- Reduce("+", S_ttuu)/N
+    Stt <- S_ttuu_avgN[1:r,1:r,drop=FALSE]
+    Suu <- S_ttuu_avgN[r+1:r,r+1:r,drop=FALSE]
+    Stu <- S_ttuu_avgN[1:r,r+1:r,drop=FALSE]
+    Shh <- Suu - t(Stu)%*%params$B - t(params$B)%*%Stu + t(params$B)%*%Stt%*%params$B
+    
+    
+    # # Stt, Suu different for each sample
+    # tmp_sig2E = sapply(1:N, function(e){
+    #   1/p * (sum(diag(X[e,,drop=F]%*%t(X[e,,drop=F]))) - 2*sum(diag(mu_T[e,,drop=F]%*%t(params$W)%*%t(X[e,,drop=F]))) +
+    #            sum(diag(S_ttuu[[e]][1:r,1:r,drop=FALSE])) - sum(diag(params$SigTo)))
+    # })
+    # tmp_sig2F = sapply(1:N, function(e){
+    #   1/q * (sum(diag(Y[e,,drop=F]%*%t(Y[e,,drop=F]))) - 2*sum(diag(mu_U[e,,drop=F]%*%t(params$C)%*%t(Y[e,,drop=F]))) +
+    #            sum(diag(S_ttuu[[e]][r+1:r,r+1:r,drop=FALSE])) - sum(diag(params$SigUo)))
+    # })
+    
+    # params$sig2E = mean(tmp_sig2E)
+    # params$sig2F = mean(tmp_sig2F)
+    
+    # if(params$sig2E < 0) params$sig2E = 1e-5
+    # if(params$sig2F < 0) params$sig2F = 1e-5
+    
+    params$B[k,k] = (t(Stu) %*% MASS::ginv(Stt))[k,k]
+    params$SigT[k,k] = Stt[k,k]
+    params$SigU[k,k] = Suu[k,k]
+    params$SigH[k,k] = Shh[k,k]
+    params$a0 = params$a0 + s*grd_ab[,1]
+    params$a = params$a + s*grd_ab[,1+1:r]
+    params$b = params$b + s*grd_ab[,1+r+1:r]
+    
+    params$W[,k] = orth(t(X/N) %*% mu_T[,k,drop=F] %*% (1/Stt[k,k,drop=F]))
+    params$C[,k] = orth(t(Y/N) %*% mu_U[,k,drop=F] %*% (1/Suu[k,k,drop=F]))
+    
+    # params$sig2E = 1/p * abs(sum(diag(X%*%t(X)))/N - 2*sum(diag(mu_T%*%t(params$W)%*%t(X)))/N +
+    #                        sum(diag(params$SigT)) - sum(diag(params$SigTo)))
+    # params$sig2F = 1/q * abs(sum(diag(Y%*%t(Y)))/N - 2*sum(diag(mu_U%*%t(params$C)%*%t(Y)))/N +
+    #                        sum(diag(params$SigU)) - sum(diag(params$SigUo)))
+    
+    return(params)
+  })
+}
+
 
 
 # common parts in GH for one component model
@@ -308,7 +357,7 @@ GH_com_fast <- function(Nr.cores=1, level=5, X,Y,Z, params, fixtu, k, plot_nodes
 # f(z|tu) * f(x|t) * f(y|u)
 fun_com_fast <- function(i, x,y,z,params,k,fixtu_i){
   r <- 1
-  rr <- ncol(fixtu)/2
+  rr <- ncol(fixtu_i)/2
   p <- nrow(params$W)
   q <- nrow(params$C)
   alpha <- with(params, cbind(a0,a-b%*%B,b))
@@ -332,4 +381,95 @@ fun_com_fast <- function(i, x,y,z,params,k,fixtu_i){
       (y-i$n[,2]%*%t(C[,k]))%*%t(y-i$n[,2]%*%t(C[,k]))))) %>% as.numeric()
   
   return(log(z_tu) + l_xt + l_yu + log(i$w))
+}
+
+
+## function for numerical integration of Q_ab
+GH_Q_ab_fast <- function(beta, l_n, Z, params, k, fixtu, l_com, de){
+  N = length(Z)
+  r=ncol(fixtu)/2
+  # adjust (t,u) to (t,h)
+  fixth <- fixtu
+  fixth[,r+1:r] <- fixth[,r+1:r] - fixth[,1:r]%*% params$B
+  l_n <- lapply(l_n, function(e) {
+    e[,2] <- e[,2] - e[,1]%*% params$B[k,k,drop=F]
+    return(e)
+  })
+  int_diff <- vector(mode = 'list', length = N)
+  for(i in 1:N){
+    int_diff[[i]] <- lapply(l_n, function(e){
+      fixth[i,c(k,r+k)] <- e
+      return(fixth[i,,drop=F])
+    })
+  }
+  
+  # log p(z|tu)
+  int_diff_z <- vector(mode = 'list', length = N)
+  for(i in 1:N){
+    int_diff_z[[i]] <- lapply(int_diff[[i]], function(e){
+      if(Z[i]==1){
+        a_tmp <- as.numeric(-(cbind(1,e) %*% t(beta)))
+        m <- max(0, a_tmp)
+        -(m + log(exp(-m) + exp(a_tmp-m)))
+      }else{
+        a_tmp <- as.numeric(cbind(1,e) %*% t(beta))
+        m <- max(0, a_tmp)
+        -(m + log(exp(-m) + exp(a_tmp-m)))
+      }
+    })
+  }
+  
+  # combine common parts
+  Q_ab <- lapply(1:N, function(e) Reduce("+", Map("*", int_diff_z[[e]], l_com[[e]])))
+  # Q_ab <- rapply(Q_ab, f=function(x) ifelse(is.nan(x),0,x), how="replace")
+  Q_ab <- Map("/", Q_ab, de)
+  # Add N samples
+  Q_ab <- Reduce("+", Q_ab)
+  return(Q_ab)
+}
+
+## function for numerical integration of gradient of Q_ab
+GH_grd_ab_fast <- function(l_n, Z, params, k, fixtu, l_com, de){
+  N = length(Z)
+  r=ncol(fixtu)/2
+  # adjust (t,u) to (t,h)
+  fixth <- fixtu
+  fixth[,r+1:r] <- fixth[,r+1:r] - fixth[,1:r]%*% params$B
+  l_n <- lapply(l_n, function(e) {
+    e[,2] <- e[,2] - e[,1]%*% params$B[k,k,drop=F]
+    return(e)
+  })
+  int_diff <- vector(mode = 'list', length = N)
+  for(i in 1:N){
+    int_diff[[i]] <- lapply(l_n, function(e){
+      fixth[i,c(k,r+k)] <- e
+      return(fixth[i,,drop=F])
+    })
+  }
+  
+  beta <- with(params, cbind(a0,a,b))
+  
+  # log p(z|tu)
+  int_diff_z <- vector(mode = 'list', length = N)
+  for(i in 1:N){
+    int_diff_z[[i]] <- lapply(int_diff[[i]], function(e){
+      if(Z[i]==1){
+        a_tmp <- as.numeric(-(cbind(1,e) %*% t(beta)))
+        m <- max(0, a_tmp)
+        exp(a_tmp-m)/(exp(-m) + exp(a_tmp-m)) * cbind(1,e)
+      }else{
+        a_tmp <- as.numeric(cbind(1,e) %*% t(beta))
+        m <- max(0, a_tmp)
+        - exp(a_tmp-m)/(exp(-m) + exp(a_tmp-m)) * cbind(1,e)
+      }
+    })
+  }
+  
+  # combine common parts
+  grd_ab <- lapply(1:N, function(e) Reduce("+", Map("*", int_diff_z[[e]], l_com[[e]])))
+  # grd_ab <- rapply(grd_ab, f=function(x) ifelse(is.nan(x),0,x), how="replace")
+  grd_ab <- Map("/", grd_ab, de)
+  # Add N samples
+  grd_ab <- Reduce("+", grd_ab)
+  return(grd_ab)
 }
