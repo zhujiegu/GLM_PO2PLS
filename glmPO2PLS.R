@@ -1234,11 +1234,14 @@ Su_PO2PLS_bi <- function(X, Y, Z, r, rx, ry, steps = 1e5, tol = 1e-6, level=leve
   # Check Z
   
   
-  if(all(c("W","Wo","C","Co","B","SigT","SigTo","SigUo","SigH","sig2E","sig2F","a0","a","b") %in% names(init_param))){
+  if(all(c("W","Wo","C","Co","B","SigT","SigTo","SigUo","SigH","sig2E","sig2F","a0","a","b") 
+         %in% names(init_param))){
     message('using old fit \n')
     params <- init_param}
-  else if(all(c("W","Wo","C","Co","B","SigT","SigTo","SigUo","SigH","sig2E","sig2F","a","b","sig2G") %in% names(init_param))){
+  else if(all(c("W","Wo","C","Co","B","SigT","SigTo","SigUo","SigH","sig2E","sig2F","a","b","sig2G") 
+              %in% names(init_param))){
     message('using old fit from Gaussian model \n')
+    if(ncol(init_param$W)!=r) stop('initial parameter number of components mismatch')
     init_param$a0 <- 0
     params <- init_param[names(init_param)!='sig2G']
   }
@@ -1353,10 +1356,10 @@ Su_PO2PLS_bi <- function(X, Y, Z, r, rx, ry, steps = 1e5, tol = 1e-6, level=leve
 }
 
 # chi-squared test of (a0,a,b) for binary
-chi2_ab_bi <- function(fit, X, Y, Z, level=NULL, Nr.core=NULL){
+chi2_ab_bi <- function(fit, Z, level=NULL, Nr.core=NULL){
   B <- fit$params$B
   r = ncol(B)
-  N = nrow(X)
+  N = nrow(fit$latent_var$mu_T)
   
   # tmp.Estep <- E_step_bi(X, Y, Z, fit$par, level = level, Nr.core = Nr.core)
   # GH_com <- tmp.Estep$GH_common

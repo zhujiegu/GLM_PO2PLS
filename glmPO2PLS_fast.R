@@ -60,8 +60,65 @@ Su_PO2PLS_bi_filter <- function(X, Y, Z, r, rx, ry, steps, tol, level,
   }
 }
 
+# this only update k-th component on the filtered dataset
+Su_PO2PLS_bi_filter_k <- function(X, Y, Z, r, rx, ry, k=1, steps, tol, level, 
+                                Nr.core =1, init_param= 'o2m', orth_type = 'SVD', 
+                                random_restart = 'F'){
+  if(r==1){
+    return(Su_PO2PLS_bi(X, Y, Z, 1, rx, ry, steps = steps, tol = tol, level=level, Nr.core =Nr.core, 
+                        init_param= init_param, orth_type = orth_type, random_restart = random_restart))
+  }
+  if(r>1){
+    print('More than 1 joint comp, fitting GLM-PO2PLS Gaussian model first')
+    fit_tmp <- Su_PO2PLS(X, Y, Z, r, rx, ry, steps = 1000, tol = tol, init_param= init_param)
+    fit_tmp$params <- fit_tmp$params[names(fit_tmp$params)!='sig2G']
+    
+    # filter data
+    x_k <- with(fit_tmp, X - latent_var$mu_T[,-k,drop=F] %*% t(params$W[,-k,drop=F]) -
+                  latent_var$mu_To %*% t(params$Wo))
+    y_k <- with(fit_tmp, Y - latent_var$mu_U[,-k,drop=F] %*% t(params$C[,-k,drop=F]) -
+                  latent_var$mu_Uo %*% t(params$Co))
+    print(paste('fitting binary model for component',k))
+    if(all(c("W","Wo","C","Co","B","SigT","SigTo","SigUo","SigH","sig2E","sig2F","a0","a","b")
+           %in% names(init_param))){
+      message('using modified old fit as initial parameters \n')
+      params_k <- init_param
+      params_k$W <- params_k$W[,k,drop=F]
+      params_k$C <- params_k$C[,k,drop=F]
+      params_k$B <- params_k$B[k,k,drop=F]
+      params_k$SigT <- params_k$SigT[k,k,drop=F] 
+      params_k$SigH <- params_k$SigH[k,k,drop=F]
+      params_k$SigU <- params_k$SigU[k,k,drop=F]
+      params_k$a0 <- params_k$a0
+      params_k$a <- params_k$a[,k,drop=F]
+      params_k$b <- params_k$b[,k,drop=F]
+      params_k$Wo <- params_k$Wo*0
+      params_k$Co <- params_k$Co*0
+      params_k$SigTo <- matrix(0,1,1)
+      params_k$SigUo <- matrix(0,1,1)
+    }else{
+      params_k <- fit_tmp$params
+      params_k$W <- params_k$W[,k,drop=F]
+      params_k$C <- params_k$C[,k,drop=F]
+      params_k$B <- params_k$B[k,k,drop=F]
+      params_k$SigT <- params_k$SigT[k,k,drop=F] 
+      params_k$SigH <- params_k$SigH[k,k,drop=F]
+      params_k$SigU <- params_k$SigU[k,k,drop=F]
+      params_k$a0 <- 0
+      params_k$a <- params_k$a[,k,drop=F]
+      params_k$b <- params_k$b[,k,drop=F]
+      params_k$Wo <- params_k$Wo*0
+      params_k$Co <- params_k$Co*0
+      params_k$SigTo <- matrix(0,1,1)
+      params_k$SigUo <- matrix(0,1,1)
+    }
+    fit_k <- Su_PO2PLS_bi(x_k, y_k, Z, 1, 0, 0, steps = steps, tol = tol, level=level, Nr.core =Nr.core, 
+                            init_param= params_k, orth_type = orth_type, random_restart = random_restart)
+    return(fit_k)
+  }
+}
 
-# A one-comp binary model that updates all the (a,b)
+# A one-comp binary model that updates all the (a,b) sequentially for k=1,2,...,K
 Su_PO2PLS_bi_fast <- function(X, Y, Z, r, rx, ry, steps = 1e5, tol = 1e-6, level=level, 
                               Nr.core =1, init_param= c('random','o2m'), orth_type = "SVD", 
                               random_restart = FALSE){
@@ -148,6 +205,95 @@ Su_PO2PLS_bi_fast <- function(X, Y, Z, r, rx, ry, steps = 1e5, tol = 1e-6, level
   return(outputt)
 }
 
+
+Su_PO2PLS_bi_k <- function(X, Y, Z, r, rx, ry, k=1, steps = 1e5, tol = 1e-6, level=level, 
+                              Nr.core =1, init_param= c('random','o2m'), orth_type = "SVD", 
+                              random_restart = FALSE){
+  
+  # initial fit of GLM-PO2PLS Gaussian modle
+  message('Initial fit with GLM-PO2PLS Gaussian model')
+  fit_ini <- Su_PO2PLS(X, Y, Z, r, rx, ry, steps = 1000, tol = tol, init_param= init_param)
+  fit_ini$params <- fit_ini$params[names(fit_ini$params)!='sig2G']
+  
+  if(all(c("W","Wo","C","Co","B","SigT","SigTo","SigUo","SigH","sig2E","sig2F","a0","a","b") 
+         %in% names(init_param))){
+    fit_ini$params$a <- init_param$a
+    fit_ini$params$b <- init_param$b
+    fit_ini$params$a0 <- init_param$a0
+  }else{
+    fit_ini$params$a0 <- 0
+  }
+  params <- fit_ini$params
+  fixtu <- with(fit_ini$latent_var, cbind(mu_T, mu_U))
+  
+  # filter data
+  x_k <- X - fixtu[, -c(k,r+1:r),drop=F] %*% t(params$W[,-k,drop=F]) -
+    fit_ini$latent_var$mu_To %*% t(params$Wo)
+  y_k <- Y - fixtu[, -c(k+r,1:r),drop=F] %*% t(params$C[,-k,drop=F]) -
+    fit_ini$latent_var$mu_Uo %*% t(params$Co)
+  print(paste('fitting binary model for component',k))
+  
+  logl = 0*0:steps
+  tic <- proc.time()
+  print(paste('started',date()))
+  
+  i_rr <- 0
+  random_restart_original <- random_restart
+  random_restart <- TRUE
+  while(random_restart){
+    
+    if(i_rr > 0) {
+      message("Log-likelihood: ", logl[i+1])
+      message(paste("random restart no",i_rr))
+    }
+    params_max <- params
+    for(i in 1:steps){
+      E_next = E_step_bi_fast( X=x_k, Y=y_k, Z=Z, params=params, fixtu=fixtu, k=k, level=level, 
+                               Nr.core=Nr.core)
+      params_next = M_step_bi_fast(E_fit=E_next, params=params, X=x_k, Y=y_k, Z=Z, k=k)
+      # params_next$B <- abs(params_next$B)
+      
+      if(i == 1) logl[1] = E_next$logl
+      logl[i+1] = E_next$logl
+      
+      if(i > 1 && abs(logl[i+1]-logl[i]) < tol) break
+      if(i %in% c(1, 1e1, 1e2, 1e3, 5e3, 1e4, 4e4)) {
+        print(data.frame(row.names = 1, steps = i, time = unname(proc.time()-tic)[3], diff = logl[i+1]-logl[i], logl = logl[i+1]))
+      }
+      # solve(0)
+      if(logl[i+1] > max(logl[1:i])) params_max <- params_next
+      params = params_next
+    }
+    if(!any(diff(logl[-1]) < -1e-10) | !random_restart_original) {
+      random_restart = FALSE
+      break
+    }
+    i_rr <- i_rr + 1
+    params <- jitter_params(params)
+    params[-(1:4)] <- generate_params_bi(X, Y, Z, r, rx, ry, type = 'r')[-(1:4)]
+  }
+
+  # latent variable values
+  E_outp = E_step_bi_fast( X=x_k, Y=y_k, Z=Z, params=params, fixtu=fixtu, k=k, level=level, 
+                  Nr.core=Nr.core)
+  latent_var <- E_outp[names(E_outp) %in% c('mu_T', 'mu_U', 'mu_To', 'mu_Uo')]
+  
+  # R-square Z fit
+  # mu_z <- with(params, a0 + X%*%W%*%(t(a)-B%*%t(b)) + Y%*%C%*%t(b))
+  # z_p <- 1/(1+exp(-mu_z))
+  # pre_z <- ifelse(z_p > 0.5, 1,0)
+  # levs <- c(0,1)
+  # zfit <- table(factor(pre_z, levs), factor(Z, levs))
+  # acc <- caret::confusionMatrix(zfit)$overall['Accuracy']
+  
+  message("Nr steps was ", i)
+  message("Log-likelihood: ", logl[i+1])
+  # message("Accuracy of z fit: ", acc)
+  outputt <- list(params = params, latent_var=latent_var, logl = logl[0:i+1][-1], 
+                  GH_com=E_outp$GH_common,level=level) #, debug = debug_list)
+  class(outputt) <- "PO2PLS"
+  return(outputt)
+}
 
 E_step_bi_fast <- function(X, Y, Z, params, fixtu, k, level = level, Nr.core=1){
   # retrieve parameters
@@ -472,4 +618,157 @@ GH_grd_ab_fast <- function(l_n, Z, params, k, fixtu, l_com, de){
   # Add N samples
   grd_ab <- Reduce("+", grd_ab)
   return(grd_ab)
+}
+
+
+
+# chi-squared test of (a0,a,b) for binary
+chi2_ab_bi_fast <- function(fit, Z, k=1, level=NULL, Nr.core=NULL){
+  B <- fit$params$B
+  r = ncol(B)
+  N = nrow(fit$latent_var$mu_T)
+  fixtu <- with(fit$latent_var, cbind(mu_T, mu_U))
+  
+  # tmp.Estep <- E_step_bi(X, Y, Z, fit$par, level = level, Nr.core = Nr.core)
+  # GH_com <- tmp.Estep$GH_common
+  GH_com <- fit$GH_com
+  
+  list_com_log <- GH_com$list_com_log # values of common parts (list(length N) of list (dim^Q))
+  list_nodes <- GH_com$nodes
+  # divide both numerator and denominator by exp(max), to avoid "Inf"
+  list_com_sub <- lapply(list_com_log, function(e){
+    e <- unlist(e)
+    max_e <- max(e)
+    as.list(exp(e-max_e))
+  }
+  )
+  
+  # likelihood of each sample
+  list_lik_log <- lapply(list_com_log, function(e){
+    e <- unlist(e)
+    max_e <- max(e)
+    return(max_e + log(sum(exp(e-max_e))))
+  })
+  
+  # Denominator = f(x,y,z)/exp(max)
+  dnmt <- lapply(1:N, function(e) Reduce("+", list_com_sub[[e]]))
+  
+  # adjust (t,u) to (t,h)
+  fixth <- fixtu
+  fixth[,r+1:r] <- fixth[,r+1:r] - fixth[,1:r]%*% B
+  list_nodes_th <- lapply(list_nodes, function(e) {
+    e[,2] <- e[,2] - e[,1]%*% B[k,k,drop=F]
+    return(e)
+  })
+  beta <- with(fit$params, cbind(a0,a,b))
+  aabb <- with(fit$params, cbind(a,b))
+  
+  S_ab <- GH_I_ab_fast(beta,list_nodes_th,Z,list_com_sub,dnmt,'S',fixth,k)
+  S2_ab <- GH_I_ab_fast(beta,list_nodes_th,Z,list_com_sub,dnmt,'S2',fixth,k)
+  B_ab <- GH_I_ab_fast(beta,list_nodes_th,Z,list_com_sub,dnmt,'B',fixth,k)
+  
+  SiSj <- matrix(0, 1+2*r, 1+2*r)
+  for(i in 2:N){
+    for(j in 1:(i-1)){
+      SiSj <- SiSj + S_ab[[i]]%*%t(S_ab[[j]])
+    }
+  }
+  info_ab = (Reduce('+', B_ab) - Reduce('+', S2_ab) - SiSj - t(SiSj))[-1,-1]
+  # print(info_ab)
+  
+  # test for all components
+  stat = as.numeric(aabb %*% info_ab %*% t(aabb))
+  if(stat<0){
+    message('Negative Chi-square statistic for global test, try to set the level higher')
+    p_global = NULL
+  }else{
+    p_global = pchisq(stat, df=2*r, lower.tail=FALSE)
+  }
+  
+  # test for pair
+  stat_pair <- p_pair <- c()
+  for(k in 1:r){
+    stat_pair[k] <- as.numeric(aabb[,c(k,k+r),drop=F] %*% info_ab[c(k,k+r),c(k,k+r),drop=F]
+                            %*% t(aabb[,c(k,k+r),drop=F]))
+    if(stat_pair[k]<0){
+      stat_pair[k] = NULL
+    } 
+    else{
+      p_pair[k] = pchisq(stat_pair[k], df=2, lower.tail=FALSE)
+    }
+  } 
+
+
+  return(list(p_global=p_global, p_pair=p_pair))
+}
+
+## function for numerical integration of E[S(ab)|xyz], E[B(ab)|xyz], E[S(ab)S(ab)'|xyz]
+GH_I_ab_fast <- function(beta, l_n=list_nodes_th,Z=Z,l_com=list_com_sub,de=dnmt,term,fixth,k){
+  N = length(Z)
+  r=ncol(fixth)/2
+
+  int_diff <- vector(mode = 'list', length = N)
+  for(i in 1:N){
+    int_diff[[i]] <- lapply(l_n, function(e){
+      fixth[i,c(k,r+k)] <- e
+      return(fixth[i,,drop=F])
+    })
+  }
+  
+  int_diff_z <- vector(mode = 'list', length = N)
+  
+  if(term=="S"){  # Q'_ab
+    for(i in 1:N){
+      int_diff_z[[i]] <- lapply(int_diff[[i]], function(e){
+        if(Z[i]==1){
+          a_tmp <- as.numeric(-(cbind(1,e) %*% t(beta)))
+          m <- max(0, a_tmp)
+          exp(a_tmp-m)/(exp(-m) + exp(a_tmp-m)) * t(cbind(1,e))
+        }else{
+          a_tmp <- as.numeric(cbind(1,e) %*% t(beta))
+          m <- max(0, a_tmp)
+          - exp(a_tmp-m)/(exp(-m) + exp(a_tmp-m)) * t(cbind(1,e))
+        }
+      })
+    }
+  }
+  
+  if(term=="B"){
+    for(i in 1:N){
+      int_diff_z[[i]] <- lapply(int_diff[[i]], function(e){
+        if(Z[i]==1){
+          a_tmp <- as.numeric(-(cbind(1,e) %*% t(beta)))
+          m <- max(0, a_tmp)
+          exp(a_tmp-m)/(exp(-m) + 2*exp(a_tmp-m) + exp(2*a_tmp-m)) * (t(cbind(1,e))%*%cbind(1,e))
+        }else{
+          a_tmp <- as.numeric(cbind(1,e) %*% t(beta))
+          m <- max(0, a_tmp)
+          exp(a_tmp-m)/(exp(-m) + 2*exp(a_tmp-m) + exp(2*a_tmp-m)) * (t(cbind(1,e))%*%cbind(1,e))
+        }
+      })
+    }
+  }
+  
+  if(term=="S2"){
+    for(i in 1:N){
+      int_diff_z[[i]] <- lapply(int_diff[[i]], function(e){
+        if(Z[i]==1){
+          a_tmp <- as.numeric(-(cbind(1,e) %*% t(beta)))
+          m <- max(0, a_tmp)
+          (exp(a_tmp-m)/(exp(-m) + exp(a_tmp-m)))^2 * (t(cbind(1,e))%*%cbind(1,e))
+        }else{
+          a_tmp <- as.numeric(cbind(1,e) %*% t(beta))
+          m <- max(0, a_tmp)
+          (exp(a_tmp-m)/(exp(-m) + exp(a_tmp-m)))^2 * (t(cbind(1,e))%*%cbind(1,e))
+        }
+      })
+    }
+  }
+  
+
+  # combine common parts
+  int_ab <- lapply(1:N, function(e) Reduce("+", Map("*", int_diff_z[[e]], l_com[[e]])))
+  # grd_ab <- rapply(grd_ab, f=function(x) ifelse(is.nan(x),0,x), how="replace")
+  int_ab <- Map("/", int_ab, de)
+  return(int_ab)
 }
